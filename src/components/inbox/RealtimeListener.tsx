@@ -22,7 +22,7 @@ export function RealtimeListener() {
         // transient — try again next tick
       }
     };
-    const id = setInterval(tick, 25_000);
+    const id = setInterval(tick, 50_000);
     return () => {
       active = false;
       clearInterval(id);

@@ -34,7 +34,7 @@ export default async function InboxPage({
   const threadItems = gmailConnected ? await getInboxThreads(userId) : [];
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
+    <div className="flex h-dvh flex-col overflow-hidden">
       {gmailConnected && <RealtimeListener />}
 
       <header className="flex shrink-0 items-center justify-between border-b px-4 py-2.5">
