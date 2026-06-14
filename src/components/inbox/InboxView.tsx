@@ -81,20 +81,29 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
   const [tab, setTab] = useState<Tab>("all");
   const [selectedId, setSelectedId] = useState<string | null>(initialThreads[0]?.id ?? null);
 
+  // Live thread list — SSE/poll invalidate ["threads"] to pull fresh mail.
+  const { data: threads = initialThreads } = useQuery({
+    queryKey: ["threads"],
+    initialData: initialThreads,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const res = await fetch("/api/threads");
+      if (!res.ok) throw new Error("Failed to load threads");
+      return ((await res.json()) as { threads: ThreadListItem[] }).threads;
+    },
+  });
+
   const counts = useMemo(() => {
-    const c: Record<Tab, number> = { all: initialThreads.length, urgent: 0, high: 0, action: 0 };
-    for (const t of initialThreads) {
+    const c: Record<Tab, number> = { all: threads.length, urgent: 0, high: 0, action: 0 };
+    for (const t of threads) {
       if (t.priority === "urgent") c.urgent++;
       if (t.priority === "high") c.high++;
       if (t.tags?.includes("action-required")) c.action++;
     }
     return c;
-  }, [initialThreads]);
+  }, [threads]);
 
-  const visible = useMemo(
-    () => initialThreads.filter((t) => matchesTab(t, tab)),
-    [initialThreads, tab]
-  );
+  const visible = useMemo(() => threads.filter((t) => matchesTab(t, tab)), [threads, tab]);
 
   const { data, isLoading } = useQuery({
     queryKey: ["thread", selectedId],
@@ -107,7 +116,7 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
     },
   });
 
-  if (initialThreads.length === 0) {
+  if (threads.length === 0) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-2 text-center text-muted-foreground">
         <InboxIcon className="size-6" />

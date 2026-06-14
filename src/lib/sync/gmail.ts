@@ -1,4 +1,5 @@
 import "server-only";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { emailThreads, emails } from "@/lib/db/schema";
 import { listMessages, getMessage } from "@/lib/corsair/client";
@@ -59,12 +60,16 @@ function parseList(v: string | null): string[] {
     .filter((e): e is string => !!e);
 }
 
-export async function syncGmail(userId: string, maxResults = 30): Promise<number> {
+export async function syncGmail(
+  userId: string,
+  maxResults = 30
+): Promise<{ processed: number; created: number }> {
   const list = (await listMessages(userId, { maxResults, q: "in:inbox" })) as {
     messages?: { id: string }[];
   };
   const ids = list.messages?.map((m) => m.id) ?? [];
-  let synced = 0;
+  let processed = 0;
+  let created = 0;
 
   for (const id of ids) {
     const msg = (await getMessage(userId, id)) as GmailMessage;
@@ -73,10 +78,11 @@ export async function syncGmail(userId: string, maxResults = 30): Promise<number
     const subject = getHeader(headers, "Subject");
     const bodies = collectBodies(msg.payload);
     const receivedAt = msg.internalDate ? new Date(Number(msg.internalDate)) : null;
+    const receivedIso = receivedAt?.toISOString() ?? null;
     const labels = msg.labelIds ?? [];
     const snippet = msg.snippet?.slice(0, 300) ?? null;
 
-    const [thread] = await db
+    const upserted = await db
       .insert(emailThreads)
       .values({
         userId,
@@ -100,13 +106,24 @@ export async function syncGmail(userId: string, maxResults = 30): Promise<number
           lastMessageAt: receivedAt,
           updatedAt: new Date(),
         },
+        setWhere: sql`${emailThreads.lastMessageAt} is null or ${emailThreads.lastMessageAt} < ${receivedIso}::timestamptz`,
       })
       .returning({ id: emailThreads.id });
 
-    await db
+    let threadId = upserted[0]?.id;
+    if (!threadId) {
+      const [existing] = await db
+        .select({ id: emailThreads.id })
+        .from(emailThreads)
+        .where(and(eq(emailThreads.userId, userId), eq(emailThreads.gmailThreadId, msg.threadId)));
+      threadId = existing?.id;
+    }
+    if (!threadId) continue;
+
+    const inserted = await db
       .insert(emails)
       .values({
-        threadId: thread.id,
+        threadId,
         userId,
         gmailMessageId: msg.id,
         fromEmail: from.email,
@@ -121,10 +138,12 @@ export async function syncGmail(userId: string, maxResults = 30): Promise<number
         isSent: labels.includes("SENT"),
         receivedAt,
       })
-      .onConflictDoNothing({ target: emails.gmailMessageId });
+      .onConflictDoNothing({ target: emails.gmailMessageId })
+      .returning({ id: emails.id });
 
-    synced++;
+    processed++;
+    if (inserted.length) created++;
   }
 
-  return synced;
+  return { processed, created };
 }
