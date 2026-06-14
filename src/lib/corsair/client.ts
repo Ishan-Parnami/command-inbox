@@ -2,8 +2,7 @@ import "server-only";
 import { createClient, type RunResult } from "@corsair-dev/app";
 
 // ── Hosted Corsair client (singleton) ─────────────────────────────────────────
-// Corsair stores OAuth tokens server-side per tenant. We never handle Google
-// tokens ourselves. Dev key starts with `ch_`; instance id from the dashboard.
+// Corsair stores OAuth tokens server-side per tenant.
 const client = createClient({ apiKey: process.env.CORSAIR_DEV_KEY! });
 const instance = client.instance(process.env.CORSAIR_INSTANCE_ID!);
 
