@@ -1,0 +1,40 @@
+import { redirect } from "next/navigation";
+import { Command } from "lucide-react";
+import { auth } from "@/auth";
+import { GoogleSignInButton } from "@/components/shared/GoogleSignInButton";
+import { ThemeToggle } from "@/components/shared/ThemeToggle";
+
+export default async function LoginPage() {
+  const session = await auth();
+  if (session?.user) redirect("/");
+
+  return (
+    <div className="flex flex-1 flex-col">
+      <header className="flex items-center justify-end p-4">
+        <ThemeToggle />
+      </header>
+
+      <main className="flex flex-1 items-center justify-center px-6 pb-24">
+        <div className="w-full max-w-sm space-y-8">
+          <div className="space-y-3 text-center">
+            <div className="mx-auto flex size-11 items-center justify-center rounded-xl border bg-card">
+              <Command className="size-5 text-primary" />
+            </div>
+            <div className="space-y-1">
+              <h1 className="text-xl font-semibold tracking-tight">Command Inbox</h1>
+              <p className="text-sm text-muted-foreground">
+                A keyboard-first command center for Gmail &amp; Calendar.
+              </p>
+            </div>
+          </div>
+
+          <GoogleSignInButton />
+
+          <p className="text-center text-xs text-muted-foreground">
+            You&apos;ll connect Gmail and Calendar in the next step.
+          </p>
+        </div>
+      </main>
+    </div>
+  );
+}
