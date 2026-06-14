@@ -57,22 +57,19 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-// ── corsair_integrations ──────────────────────────────────────────────────────
-export const corsairIntegrations = pgTable(
-  "corsair_integrations",
+// ── corsair_connections ───────────────────────────────────────────────────────
+// Hosted Corsair stores OAuth tokens server-side; we only track connection state
+// per provider. Tenant id == users.id, so no token/connection-id columns here.
+export const corsairConnections = pgTable(
+  "corsair_connections",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    provider: varchar("provider", { length: 20 }).notNull(), // 'gmail' | 'gcal'
-    corsairConnectionId: varchar("corsair_connection_id", { length: 255 })
-      .notNull()
-      .unique(),
-    accessTokenEnc: text("access_token_enc").notNull(),
-    refreshTokenEnc: text("refresh_token_enc").notNull(),
-    tokenExpiresAt: timestamp("token_expires_at", { withTimezone: true }),
+    provider: varchar("provider", { length: 20 }).notNull(), // 'gmail' | 'googlecalendar'
     connectedEmail: varchar("connected_email", { length: 255 }),
+    status: varchar("status", { length: 20 }).default("connected").notNull(), // connected | needs_auth
     metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -231,6 +228,7 @@ export const contacts = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     email: varchar("email", { length: 255 }).notNull(),
     name: varchar("name", { length: 255 }),
+    isVip: boolean("is_vip").default(false).notNull(),
     emailCount: integer("email_count").default(0).notNull(),
     lastEmailedAt: timestamp("last_emailed_at", { withTimezone: true }),
     avgReplyHours: real("avg_reply_hours"),
@@ -366,7 +364,7 @@ export const agentConversations = pgTable("agent_conversations", {
 // ── Relations ─────────────────────────────────────────────────────────────────
 
 export const usersRelations = relations(users, ({ many }) => ({
-  integrations: many(corsairIntegrations),
+  connections: many(corsairConnections),
   threads: many(emailThreads),
   calendars: many(calendars),
   drafts: many(emailDrafts),
@@ -407,7 +405,7 @@ export const calendarEventsRelations = relations(calendarEvents, ({ one, many })
 // ── Type exports ──────────────────────────────────────────────────────────────
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
-export type CorsairIntegration = typeof corsairIntegrations.$inferSelect;
+export type CorsairConnection = typeof corsairConnections.$inferSelect;
 export type EmailThread = typeof emailThreads.$inferSelect;
 export type Email = typeof emails.$inferSelect;
 export type EmailAttachment = typeof emailAttachments.$inferSelect;

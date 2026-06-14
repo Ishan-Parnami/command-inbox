@@ -1,0 +1,139 @@
+import "server-only";
+import { createClient, type RunResult } from "@corsair-dev/app";
+
+// ── Hosted Corsair client (singleton) ─────────────────────────────────────────
+// Corsair stores OAuth tokens server-side per tenant. We never handle Google
+// tokens ourselves. Dev key starts with `ch_`; instance id from the dashboard.
+const client = createClient({ apiKey: process.env.CORSAIR_DEV_KEY! });
+const instance = client.instance(process.env.CORSAIR_INSTANCE_ID!);
+
+/** TenantScope for a given app user. Tenant id == our user id. */
+export function tenant(tenantId: string) {
+  return instance.tenant(tenantId);
+}
+
+/**
+ * Unwrap a `tenant.run()` result. Throws {@link CorsairAuthError} carrying the
+ * Corsair-hosted sign-in link when the user hasn't connected the provider yet,
+ * so route handlers can redirect to it.
+ */
+export class CorsairAuthError extends Error {
+  constructor(public signInLink: string) {
+    super("Corsair connection required");
+    this.name = "CorsairAuthError";
+  }
+}
+
+function unwrap<T>(res: RunResult<T>): T {
+  if (!res.success) throw new CorsairAuthError(res.signInLink);
+  return res.data;
+}
+
+// ── OAuth / connection ────────────────────────────────────────────────────────
+export type Provider = "gmail" | "googlecalendar";
+
+/** Hosted authorize URL for connecting a single provider. */
+export async function authorizeUrl(
+  userId: string,
+  provider: Provider,
+  returnTo?: string
+): Promise<string> {
+  const { authorizeUrl } = await tenant(userId).plugins.oauth.authorizeUrl(provider, returnTo);
+  return authorizeUrl;
+}
+
+/** Self-service connect link covering all installed plugins for the tenant. */
+export async function connectLink(userId: string): Promise<string> {
+  const link = await tenant(userId).connectLink.create();
+  return link.url;
+}
+
+// ── Gmail ──────────────────────────────────────────────────────────────────────
+// Operation paths verified against api.corsair.dev/md/integrations/gmail.
+// Inputs follow the native Gmail REST shape; confirm per-op fields at
+// api.corsair.dev/md/integrations/<path> when extending.
+
+export function listMessages(userId: string, input: { maxResults?: number; q?: string; pageToken?: string }) {
+  return tenant(userId).run("gmail.api.messages.list", input).then(unwrap);
+}
+
+export function getMessage(userId: string, id: string) {
+  return tenant(userId).run("gmail.api.messages.get", { id, format: "full" }).then(unwrap);
+}
+
+export function getThread(userId: string, id: string) {
+  return tenant(userId).run("gmail.api.threads.get", { id, format: "full" }).then(unwrap);
+}
+
+/** Corsair-cached local Gmail search (sub-second, no live Gmail round-trip). */
+export function searchCachedMessages(userId: string, query: string, limit = 20) {
+  return tenant(userId).run("gmail.db.messages.search", { query, limit }).then(unwrap);
+}
+
+/** Send a message. `raw` is an RFC-2822 message, base64url-encoded (Gmail contract). */
+export function sendMessage(userId: string, raw: string, threadId?: string) {
+  return tenant(userId).run("gmail.api.messages.send", { raw, threadId }).then(unwrap);
+}
+
+function modifyMessage(userId: string, id: string, addLabelIds: string[], removeLabelIds: string[]) {
+  return tenant(userId).run("gmail.api.messages.modify", { id, addLabelIds, removeLabelIds }).then(unwrap);
+}
+
+export const archiveMessage = (userId: string, id: string) => modifyMessage(userId, id, [], ["INBOX"]);
+export const markRead = (userId: string, id: string) => modifyMessage(userId, id, [], ["UNREAD"]);
+export const markUnread = (userId: string, id: string) => modifyMessage(userId, id, ["UNREAD"], []);
+export const star = (userId: string, id: string) => modifyMessage(userId, id, ["STARRED"], []);
+export const unstar = (userId: string, id: string) => modifyMessage(userId, id, [], ["STARRED"]);
+export const trashMessage = (userId: string, id: string) => modifyMessage(userId, id, ["TRASH"], ["INBOX"]);
+
+// ── Google Calendar ─────────────────────────────────────────────────────────────
+// Operation paths verified against api.corsair.dev/md/integrations/googlecalendar.
+
+export function listEvents(
+  userId: string,
+  input: { calendarId?: string; timeMin?: string; timeMax?: string; maxResults?: number }
+) {
+  return tenant(userId).run("googlecalendar.api.events.getMany", { calendarId: "primary", ...input }).then(unwrap);
+}
+
+export function getEvent(userId: string, eventId: string, calendarId = "primary") {
+  return tenant(userId).run("googlecalendar.api.events.get", { calendarId, eventId }).then(unwrap);
+}
+
+export type CreateEventInput = {
+  calendarId?: string;
+  summary: string;
+  description?: string;
+  location?: string;
+  start: { dateTime: string; timeZone?: string };
+  end: { dateTime: string; timeZone?: string };
+  attendees?: { email: string }[];
+  addGoogleMeet?: boolean;
+};
+
+export function createEvent(userId: string, input: CreateEventInput) {
+  const { calendarId = "primary", addGoogleMeet, ...event } = input;
+  return tenant(userId)
+    .run("googlecalendar.api.events.create", {
+      calendarId,
+      ...event,
+      conferenceDataVersion: addGoogleMeet ? 1 : undefined,
+      conferenceData: addGoogleMeet
+        ? { createRequest: { requestId: crypto.randomUUID() } }
+        : undefined,
+    })
+    .then(unwrap);
+}
+
+export function updateEvent(
+  userId: string,
+  eventId: string,
+  patch: Partial<CreateEventInput>,
+  calendarId = "primary"
+) {
+  return tenant(userId).run("googlecalendar.api.events.update", { calendarId, eventId, ...patch }).then(unwrap);
+}
+
+export function deleteEvent(userId: string, eventId: string, calendarId = "primary") {
+  return tenant(userId).run("googlecalendar.api.events.delete", { calendarId, eventId }).then(unwrap);
+}
