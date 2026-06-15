@@ -62,7 +62,7 @@ function parseList(v: string | null): string[] {
 
 export async function syncGmail(
   userId: string,
-  maxResults = 30
+  maxResults = 50
 ): Promise<{ processed: number; created: number }> {
   const list = (await listMessages(userId, { maxResults, q: "in:inbox" })) as {
     messages?: { id: string }[];

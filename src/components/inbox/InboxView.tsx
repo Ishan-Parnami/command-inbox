@@ -6,12 +6,13 @@ import { useHotkeys } from "react-hotkeys-hook";
 import DOMPurify from "dompurify";
 import { format } from "date-fns";
 import { toast } from "sonner";
-import { Star, Inbox as InboxIcon, Archive, Mail, MailOpen, Clock, Trash2, Keyboard, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Star, Inbox as InboxIcon, Archive, Mail, MailOpen, Clock, Trash2, PanelLeftClose, PanelLeftOpen, Reply, Forward, PenSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { CommandPalette, type PaletteGroup } from "@/components/shared/CommandPalette";
-import { KeyboardShortcutModal } from "@/components/shared/KeyboardShortcutModal";
+import { ComposeModal, type ComposeDraft, type SendPayload } from "@/components/compose/ComposeModal";
+import { DraftsMenu } from "@/components/compose/DraftsMenu";
 
 export type ThreadListItem = {
   id: string;
@@ -71,6 +72,10 @@ const UNDO_TOAST = {
   },
 };
 
+// Undo Send window — the real Gmail send fires only after this elapses.
+const SEND_UNDO_MS = 10_000;
+const SEND_TOAST = { ...UNDO_TOAST, duration: SEND_UNDO_MS };
+
 function matchesTab(t: ThreadListItem, tab: Tab) {
   if (tab === "all") return true;
   if (tab === "action") return t.tags?.includes("action-required") ?? false;
@@ -88,6 +93,36 @@ function shortDate(iso: string | null) {
 function snoozeUntilIso(ms: number) {
   return new Date(Date.now() + ms).toISOString();
 }
+
+function quoteBlock(m: Message) {
+  const when = m.receivedAt ? format(new Date(m.receivedAt), "MMM d, yyyy 'at' h:mm a") : "earlier";
+  const who = m.fromName ?? m.fromEmail ?? "someone";
+  const lines = (m.bodyText ?? "").split("\n").map((l) => `> ${l}`).join("\n");
+  return `On ${when}, ${who} wrote:\n${lines}`;
+}
+
+function replyDraft(thread: ThreadListItem, last: Message): ComposeDraft {
+  const subject = thread.subject ?? last.subject ?? "";
+  return {
+    to: last.fromEmail ?? "",
+    cc: "",
+    subject: /^re:/i.test(subject) ? subject : `Re: ${subject}`,
+    body: `\n\n${quoteBlock(last)}`,
+    threadId: thread.id,
+  };
+}
+
+function forwardDraft(thread: ThreadListItem, last: Message): ComposeDraft {
+  const subject = thread.subject ?? last.subject ?? "";
+  return {
+    to: "",
+    cc: "",
+    subject: /^fwd:/i.test(subject) ? subject : `Fwd: ${subject}`,
+    body: `\n\n---------- Forwarded message ----------\n${quoteBlock(last)}`,
+  };
+}
+
+const EMPTY_DRAFT: ComposeDraft = { to: "", cc: "", subject: "", body: "" };
 
 function MessageBody({ message }: { message: Message }) {
   // Emails carry styling meant for a light background, so render them on a white
@@ -112,7 +147,6 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
   const [tab, setTab] = useState<Tab>("all");
   const [selectedId, setSelectedId] = useState<string | null>(initialThreads[0]?.id ?? null);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   // Threads with a pending (undoable) archive/trash — hidden until committed.
@@ -273,15 +307,87 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
     });
   };
 
+  // ── Compose / reply / forward ──────────────────────────────────────────────
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeDraft, setComposeDraft] = useState<ComposeDraft>(EMPTY_DRAFT);
+  // Bumped on every open so ComposeModal remounts and re-seeds its fields.
+  const [composeKey, setComposeKey] = useState(0);
+  // Latest loaded thread messages, read lazily when starting a reply/forward.
+  const messagesRef = useRef<Message[]>([]);
+
+  const launchCompose = (draft: ComposeDraft) => {
+    setComposeDraft(draft);
+    setComposeKey((k) => k + 1);
+    setComposeOpen(true);
+  };
+  const openCompose = () => launchCompose(EMPTY_DRAFT);
+  const startReplyOrForward = (kind: "reply" | "forward") => {
+    const t = current();
+    const last = messagesRef.current[messagesRef.current.length - 1];
+    if (!t || !last) return;
+    launchCompose(kind === "reply" ? replyDraft(t, last) : forwardDraft(t, last));
+  };
+
+  // Optimistic send with a 10s Undo window; real Gmail call fires after delay.
+  const sendWithUndo = async (payload: SendPayload) => {
+    if (payload.scheduledAt) {
+      const res = await fetch("/api/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).catch(() => null);
+      if (res?.ok) {
+        toast("Scheduled to send later");
+        queryClient.invalidateQueries({ queryKey: ["drafts"] });
+      } else toast.error("Couldn’t schedule");
+      return;
+    }
+    let undone = false;
+    const timer = setTimeout(async () => {
+      if (undone) return;
+      try {
+        const res = await fetch("/api/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          if (d.signInLink) window.location.href = d.signInLink;
+          throw new Error();
+        }
+        queryClient.invalidateQueries({ queryKey: ["threads"] });
+        queryClient.invalidateQueries({ queryKey: ["drafts"] });
+        if (payload.threadId) queryClient.invalidateQueries({ queryKey: ["thread", payload.threadId] });
+      } catch {
+        toast.error("Send failed");
+      }
+    }, SEND_UNDO_MS);
+    toast("Sending…", {
+      ...SEND_TOAST,
+      action: {
+        label: "Undo",
+        onClick: () => {
+          undone = true;
+          clearTimeout(timer);
+          toast("Send canceled");
+        },
+      },
+    });
+  };
+
   useHotkeys("j", () => move(1));
   useHotkeys("k", () => move(-1));
   useHotkeys("e", () => undoableAct("archive"));
   useHotkeys("s", toggleStar);
   useHotkeys("u", toggleRead);
   useHotkeys("h", openSnooze);
+  useHotkeys("c", openCompose);
+  useHotkeys("r", () => startReplyOrForward("reply"));
+  useHotkeys("f", () => startReplyOrForward("forward"));
   useHotkeys("shift+3", () => undoableAct("trash"));
   useHotkeys("mod+k", (e) => { e.preventDefault(); setPaletteOpen((o) => !o); }, { enableOnFormTags: true });
-  useHotkeys("shift+/", () => setShortcutsOpen(true));
+  useHotkeys("shift+/", () => setPaletteOpen(true));
 
   const selectedRowRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -313,10 +419,17 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
     },
   });
 
+  useEffect(() => {
+    messagesRef.current = data?.messages ?? [];
+  }, [data]);
+
   const paletteGroups: PaletteGroup[] = [
     {
       heading: "Email",
       items: [
+        { id: "compose", label: "Compose", icon: <PenSquare />, shortcut: "C", onSelect: openCompose },
+        { id: "reply", label: "Reply", icon: <Reply />, shortcut: "R", disabled: !selected, onSelect: () => startReplyOrForward("reply") },
+        { id: "forward", label: "Forward", icon: <Forward />, shortcut: "F", disabled: !selected, onSelect: () => startReplyOrForward("forward") },
         { id: "archive", label: "Archive", icon: <Archive />, shortcut: "E", disabled: !selected, onSelect: () => undoableAct("archive") },
         { id: "star", label: selected?.isStarred ? "Unstar" : "Star", icon: <Star />, shortcut: "S", disabled: !selected, onSelect: toggleStar },
         { id: "read", label: selected?.isRead ? "Mark unread" : "Mark read", icon: selected?.isRead ? <MailOpen /> : <Mail />, shortcut: "U", disabled: !selected, onSelect: toggleRead },
@@ -324,18 +437,12 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
         { id: "trash", label: "Move to trash", icon: <Trash2 />, shortcut: "#", disabled: !selected, onSelect: () => undoableAct("trash") },
       ],
     },
-    {
-      heading: "Help",
-      items: [
-        { id: "shortcuts", label: "Keyboard shortcuts", icon: <Keyboard />, shortcut: "?", onSelect: () => setShortcutsOpen(true) },
-      ],
-    },
   ];
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} groups={paletteGroups} />
-      <KeyboardShortcutModal open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+      <ComposeModal key={composeKey} open={composeOpen} draft={composeDraft} onOpenChange={setComposeOpen} onSend={sendWithUndo} />
 
       {/* Thread list — collapsible, scrolls independently */}
       <div
@@ -344,7 +451,7 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
           collapsed ? "w-14" : "w-96"
         )}
       >
-        <div className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5">
+        <div className={cn("flex shrink-0 gap-1 border-b px-2 py-1.5", collapsed ? "flex-col items-center" : "items-center")}>
           <Button
             variant="ghost"
             size="icon-sm"
@@ -353,6 +460,10 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
           >
             {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
           </Button>
+          <Button variant="ghost" size="icon-sm" title="Compose (C)" onClick={openCompose}>
+            <PenSquare className="size-4" />
+          </Button>
+          <DraftsMenu onOpenDraft={launchCompose} />
           {!collapsed &&
             TABS.map((tb) => (
               <button
@@ -436,6 +547,13 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {selected && (
           <div className="flex shrink-0 items-center gap-0.5 border-b px-2 py-1.5">
+            <Button variant="ghost" size="icon-sm" title="Reply (R)" onClick={() => startReplyOrForward("reply")}>
+              <Reply className="size-4" />
+            </Button>
+            <Button variant="ghost" size="icon-sm" title="Forward (F)" onClick={() => startReplyOrForward("forward")}>
+              <Forward className="size-4" />
+            </Button>
+            <span className="mx-1 h-4 w-px bg-border" />
             <Button variant="ghost" size="icon-sm" title="Archive (E)" onClick={() => undoableAct("archive")}>
               <Archive className="size-4" />
             </Button>

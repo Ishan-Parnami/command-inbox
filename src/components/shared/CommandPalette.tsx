@@ -21,6 +21,13 @@ export type PaletteCommand = {
 
 export type PaletteGroup = { heading: string; items: PaletteCommand[] };
 
+// Static reference shown at the bottom — keys that aren't selectable commands.
+const NAV_HINTS: { keys: string; label: string }[] = [
+  { keys: "J / K", label: "Next / previous email" },
+  { keys: "⌘ K", label: "Open command palette" },
+  { keys: "? or ⌘ K", label: "Keyboard shortcuts" },
+];
+
 export function CommandPalette({
   open,
   onOpenChange,
@@ -53,6 +60,14 @@ export function CommandPalette({
             ))}
           </CommandGroup>
         ))}
+        <CommandGroup heading="Navigation">
+          {NAV_HINTS.map((h) => (
+            <div key={h.keys} className="flex items-center justify-between px-2 py-1.5 text-sm text-muted-foreground">
+              <span>{h.label}</span>
+              <CommandShortcut>{h.keys}</CommandShortcut>
+            </div>
+          ))}
+        </CommandGroup>
       </CommandList>
     </CommandDialog>
   );

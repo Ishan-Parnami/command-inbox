@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { and, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { corsairConnections } from "@/lib/db/schema";
@@ -30,6 +31,15 @@ export async function GET(req: Request) {
   if (provider !== "gmail" && provider !== "googlecalendar") {
     return NextResponse.redirect(new URL("/", req.url));
   }
+
+  // Idempotent: if this provider is already connected, don't re-run the OAuth
+  // probe — otherwise a Back-navigation here would bounce through Corsair OAuth
+  // and dump the user on Google's account picker.
+  const [existing] = await db
+    .select({ id: corsairConnections.id })
+    .from(corsairConnections)
+    .where(and(eq(corsairConnections.userId, userId), eq(corsairConnections.provider, provider)));
+  if (existing) return NextResponse.redirect(new URL("/", req.url));
 
   // Confirm the token works with a 1-item probe.
   try {
