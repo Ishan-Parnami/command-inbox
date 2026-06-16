@@ -43,19 +43,20 @@ Body: ${body}
 
 If no clear action items, return {"items":[]}.`;
 
-  const result = await generateJSON<ExtractResult>(MODELS.classify, prompt, EXTRACT_SCHEMA);
+  const result = await generateJSON<ExtractResult>(prompt, { model: MODELS.classify, schema: EXTRACT_SCHEMA });
   return result?.items ?? [];
 }
 
 /** Run action-item extraction on urgent+high emails that don't have items yet. */
 export async function extractActionItems(userId: string): Promise<void> {
-  // Get urgent/high email ids.
+  // Get urgent/high email ids for this user (join through emails for userId).
   const highPriority = await db
     .select({ emailId: llmClassifications.emailId })
     .from(llmClassifications)
+    .innerJoin(emails, eq(llmClassifications.emailId, emails.id))
     .where(
       and(
-        eq(llmClassifications.userId, userId),
+        eq(emails.userId, userId),
         inArray(llmClassifications.priority, ["urgent", "high"])
       )
     );

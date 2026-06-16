@@ -1,11 +1,6 @@
-import { redirect } from "next/navigation";
-import { auth } from "@/auth";
-
-// Server-side guard for every authenticated route. Unauthenticated visitors are
-// bounced to /login before any inbox UI renders.
-export default async function InboxLayout({ children }: { children: React.ReactNode }) {
-  const session = await auth();
-  if (!session?.user) redirect("/login");
-
+// The inbox page (`/`) decides what to show based on auth: the marketing
+// LandingPage for logged-out visitors, the inbox for authenticated users. So
+// this layout must NOT redirect — doing so hides the landing page.
+export default function InboxLayout({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }

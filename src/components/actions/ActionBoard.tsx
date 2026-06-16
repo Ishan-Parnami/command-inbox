@@ -1,12 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircle2, Circle, Loader2, Sparkles, X } from "lucide-react";
+import { CheckCircle2, Circle, Loader2, Sparkles, X, Trash2 } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 type ActionItem = {
   id: string;
@@ -16,7 +24,7 @@ type ActionItem = {
   createdAt: string;
 };
 
-export function ActionBoard({ onClose }: { onClose: () => void }) {
+export function ActionBoard({ onClose }: { onClose?: () => void }) {
   const [extracting, setExtracting] = useState(false);
   const qc = useQueryClient();
 
@@ -47,6 +55,15 @@ export function ActionBoard({ onClose }: { onClose: () => void }) {
     onSettled: () => qc.invalidateQueries({ queryKey: ["action-items"] }),
   });
 
+  const deleteItem = useMutation({
+    mutationFn: (id: string) =>
+      fetch(`/api/action-items?id=${encodeURIComponent(id)}`, { method: "DELETE" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["action-items"] }),
+    onError: () => toast.error("Failed to delete item"),
+  });
+
+  const [deleteTarget, setDeleteTarget] = useState<ActionItem | null>(null);
+
   const extract = async () => {
     setExtracting(true);
     try {
@@ -63,7 +80,7 @@ export function ActionBoard({ onClose }: { onClose: () => void }) {
   const items = data?.items ?? [];
 
   return (
-    <div className="flex h-full w-80 shrink-0 flex-col border-l bg-background">
+    <div className="flex h-full flex-col bg-background">
       {/* Header */}
       <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5">
         <div className="flex items-center gap-2 text-sm font-semibold">
@@ -80,9 +97,11 @@ export function ActionBoard({ onClose }: { onClose: () => void }) {
           >
             {extracting ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
           </Button>
-          <Button variant="ghost" size="icon-sm" onClick={onClose}>
-            <X className="size-4" />
-          </Button>
+          {onClose && (
+            <Button variant="ghost" size="icon-sm" onClick={onClose}>
+              <X className="size-4" />
+            </Button>
+          )}
         </div>
       </div>
 
@@ -124,6 +143,13 @@ export function ActionBoard({ onClose }: { onClose: () => void }) {
                     </p>
                   )}
                 </div>
+                <button
+                  className="mt-0.5 shrink-0 text-muted-foreground transition-colors hover:text-destructive"
+                  title="Delete item"
+                  onClick={() => setDeleteTarget(item)}
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
               </li>
             ))}
           </ul>
@@ -135,6 +161,33 @@ export function ActionBoard({ onClose }: { onClose: () => void }) {
           {items.filter((i) => !i.isDone).length} remaining · {items.filter((i) => i.isDone).length} done
         </div>
       )}
+
+      <Dialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete action item?</DialogTitle>
+            <DialogDescription className="line-clamp-3">
+              “{deleteTarget?.description}” will be permanently removed.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={deleteItem.isPending}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleteItem.isPending}
+              onClick={() => {
+                if (!deleteTarget) return;
+                deleteItem.mutate(deleteTarget.id);
+                setDeleteTarget(null);
+              }}
+            >
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

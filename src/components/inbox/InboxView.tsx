@@ -6,7 +6,10 @@ import { useHotkeys } from "react-hotkeys-hook";
 import DOMPurify from "dompurify";
 import { format } from "date-fns";
 import { toast } from "sonner";
-import { Star, Inbox as InboxIcon, Archive, Mail, MailOpen, Clock, Trash2, PanelLeftClose, PanelLeftOpen, Reply, Forward, PenSquare, CalendarDays, Bot, CheckSquare } from "lucide-react";
+import {
+  Star, Inbox as InboxIcon, Archive, Mail, MailOpen, Clock, Trash2,
+  Reply, Forward, PenSquare, CalendarDays, Bot, CheckSquare, Users, Search, Sparkles,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu";
@@ -17,8 +20,9 @@ import { CalendarSidebar } from "@/components/calendar/CalendarSidebar";
 import type { EventSeed } from "@/components/calendar/CreateEventModal";
 import { AgentSidebar } from "@/components/agent/AgentSidebar";
 import { ActionBoard } from "@/components/actions/ActionBoard";
+import { ContactsView } from "@/components/contacts/ContactsView";
 import { SearchOverlay } from "@/components/shared/SearchOverlay";
-import { useAgentStore } from "@/store/agent.store";
+import { NaturalInputBar, type ParseResult } from "@/components/shared/NaturalInputBar";
 
 export type ThreadListItem = {
   id: string;
@@ -45,6 +49,7 @@ type Message = {
 };
 
 type Tab = "all" | "urgent" | "high" | "action";
+type MainView = "agent" | "inbox" | "calendar" | "actions" | "contacts";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "all", label: "All" },
@@ -69,7 +74,6 @@ const SNOOZE_PRESETS: { label: string; ms: number }[] = [
   { label: "6 hours", ms: 360 * 60_000 },
 ];
 
-// Text-only "Undo" (no border / no background, highlighted text).
 const UNDO_TOAST = {
   duration: 15_000,
   classNames: {
@@ -78,7 +82,6 @@ const UNDO_TOAST = {
   },
 };
 
-// Undo Send window — the real Gmail send fires only after this elapses.
 const SEND_UNDO_MS = 10_000;
 const SEND_TOAST = { ...UNDO_TOAST, duration: SEND_UNDO_MS };
 
@@ -95,7 +98,6 @@ function shortDate(iso: string | null) {
   return d.toDateString() === now.toDateString() ? format(d, "h:mm a") : format(d, "MMM d");
 }
 
-// Module-level so the current-time read stays out of the component render path.
 function snoozeUntilIso(ms: number) {
   return new Date(Date.now() + ms).toISOString();
 }
@@ -131,8 +133,6 @@ function forwardDraft(thread: ThreadListItem, last: Message): ComposeDraft {
 const EMPTY_DRAFT: ComposeDraft = { to: "", cc: "", subject: "", body: "" };
 
 function MessageBody({ message }: { message: Message }) {
-  // Emails carry styling meant for a light background, so render them on a white
-  // sheet in both themes — otherwise dark-on-dark text becomes invisible.
   if (message.bodyHtml && typeof window !== "undefined") {
     const clean = DOMPurify.sanitize(message.bodyHtml, { USE_PROFILES: { html: true } });
     return (
@@ -149,6 +149,34 @@ function MessageBody({ message }: { message: Message }) {
   );
 }
 
+// ── Left nav icon button ──────────────────────────────────────────────────────
+function NavBtn({
+  icon,
+  active,
+  title,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  active?: boolean;
+  title: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      title={title}
+      onClick={onClick}
+      className={cn(
+        "flex size-10 items-center justify-center rounded-lg transition-colors",
+        active
+          ? "bg-primary/10 text-primary"
+          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+      )}
+    >
+      {icon}
+    </button>
+  );
+}
+
 export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[] }) {
   const [tab, setTab] = useState<Tab>("all");
   const [selectedId, setSelectedId] = useState<string | null>(initialThreads[0]?.id ?? null);
@@ -156,9 +184,7 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
   const [searchOpen, setSearchOpen] = useState(false);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  const [actionBoardOpen, setActionBoardOpen] = useState(false);
-  const { isOpen: agentOpen, setOpen: setAgentOpen } = useAgentStore();
-  // Threads with a pending (undoable) archive/trash — hidden until committed.
+  const [mainView, setMainView] = useState<MainView>("agent");
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   const queryClient = useQueryClient();
 
@@ -256,7 +282,6 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
     setSelectedId(v[Math.min(v.length - 1, Math.max(0, idx + delta))].id);
   };
 
-  // Archive / trash with a 15s undo window — the Gmail call fires only if not undone.
   const undoableAct = (act: "archive" | "trash") => {
     const t = current();
     if (!t) return;
@@ -316,14 +341,10 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
     });
   };
 
-  // ── Calendar panel state ────────────────────────────────────────────────────
-  const [calOpen, setCalOpen] = useState(false);
   const [calSeed, setCalSeed] = useState<EventSeed>({});
 
-  // ── Compose / reply / forward state ────────────────────────────────────────
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeDraft, setComposeDraft] = useState<ComposeDraft>(EMPTY_DRAFT);
-  // Bumped on every open so ComposeModal remounts and re-seeds its fields.
   const [composeKey, setComposeKey] = useState(0);
 
   const launchCompose = (draft: ComposeDraft) => {
@@ -333,7 +354,27 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
   };
   const openCompose = () => launchCompose(EMPTY_DRAFT);
 
-  // Optimistic send with a 10s Undo window; real Gmail call fires after delay.
+  const [naturalOpen, setNaturalOpen] = useState(false);
+  const handleNaturalResult = (result: ParseResult) => {
+    if (result.intent === "event" && result.event) {
+      setCalSeed({
+        title: result.event.title,
+        description: result.event.description,
+        startTime: result.event.startTime,
+        endTime: result.event.endTime,
+        attendees: result.event.attendees,
+      });
+      setMainView("calendar");
+    } else {
+      launchCompose({
+        to: result.email?.to ?? "",
+        cc: "",
+        subject: result.email?.subject ?? "",
+        body: result.email?.body ?? "",
+      });
+    }
+  };
+
   const sendWithUndo = async (payload: SendPayload) => {
     if (payload.scheduledAt) {
       const res = await fetch("/api/send", {
@@ -344,7 +385,7 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
       if (res?.ok) {
         toast("Scheduled to send later");
         queryClient.invalidateQueries({ queryKey: ["drafts"] });
-      } else toast.error("Couldn’t schedule");
+      } else toast.error("Couldn't schedule");
       return;
     }
     let undone = false;
@@ -388,18 +429,19 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
   useHotkeys("u", toggleRead);
   useHotkeys("h", openSnooze);
   useHotkeys("c", openCompose);
+  useHotkeys("n", () => setNaturalOpen(true));
   useHotkeys("shift+3", () => undoableAct("trash"));
   useHotkeys("mod+k", (e) => { e.preventDefault(); setPaletteOpen((o) => !o); }, { enableOnFormTags: true });
   useHotkeys("shift+/", () => setPaletteOpen(true));
   useHotkeys("mod+f", (e) => { e.preventDefault(); setSearchOpen(true); }, { enableOnFormTags: true });
-  useHotkeys("mod+slash", (e) => { e.preventDefault(); setAgentOpen(true); }, { enableOnFormTags: true });
+  useHotkeys("/", (e) => { e.preventDefault(); setSearchOpen(true); });
+  useHotkeys("mod+slash", (e) => { e.preventDefault(); setMainView("agent"); }, { enableOnFormTags: true });
 
   const selectedRowRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     selectedRowRef.current?.scrollIntoView({ block: "nearest" });
   }, [selectedId]);
 
-  // Opening an unread thread marks it read (Gmail + UI), like every mail client.
   const allThreadsRef = useRef(allThreads);
   useEffect(() => {
     allThreadsRef.current = allThreads;
@@ -424,7 +466,6 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
     },
   });
 
-  // These need data in scope so they live after the thread useQuery.
   const startReplyOrForward = (kind: "reply" | "forward") => {
     const t = current();
     const msgs = data?.messages ?? [];
@@ -442,7 +483,7 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
       title: t.subject ?? "",
       attendees: last?.fromEmail ?? undefined,
     });
-    setCalOpen(true);
+    setMainView("calendar");
   };
 
   useHotkeys("r", () => startReplyOrForward("reply"));
@@ -450,6 +491,14 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
   useHotkeys("t", emailToCalendar);
 
   const paletteGroups: PaletteGroup[] = [
+    {
+      heading: "Search & AI",
+      items: [
+        { id: "search", label: "AI search emails", icon: <Search />, shortcut: "⌘F", onSelect: () => setSearchOpen(true) },
+        { id: "agent", label: "AI assistant", icon: <Bot />, shortcut: "⌘/", onSelect: () => setMainView("agent") },
+        { id: "natural", label: "Natural compose", icon: <Sparkles />, shortcut: "N", onSelect: () => setNaturalOpen(true) },
+      ],
+    },
     {
       heading: "Email",
       items: [
@@ -465,13 +514,10 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
     },
   ];
 
-  return (
-    <div className="relative flex min-h-0 flex-1 overflow-hidden">
-      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} groups={paletteGroups} />
-      <SearchOverlay open={searchOpen} onOpenChange={setSearchOpen} onSelectThread={setSelectedId} />
-      <ComposeModal key={composeKey} open={composeOpen} draft={composeDraft} onOpenChange={setComposeOpen} onSend={sendWithUndo} />
-
-      {/* Thread list — collapsible, scrolls independently */}
+  // ── Inbox pane (2-column: thread list + reading pane) ────────────────────────
+  const inboxPane = (
+    <div className="flex min-h-0 flex-1 overflow-hidden">
+      {/* Thread list */}
       <div
         className={cn(
           "flex min-h-0 shrink-0 flex-col overflow-hidden border-r transition-[width] duration-200 ease-out",
@@ -479,18 +525,6 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
         )}
       >
         <div className={cn("flex shrink-0 gap-1 border-b px-2 py-1.5", collapsed ? "flex-col items-center" : "items-center")}>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            title={collapsed ? "Expand" : "Collapse"}
-            onClick={() => setCollapsed((c) => !c)}
-          >
-            {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
-          </Button>
-          <Button variant="ghost" size="icon-sm" title="Compose (C)" onClick={openCompose}>
-            <PenSquare className="size-4" />
-          </Button>
-          <DraftsMenu onOpenDraft={launchCompose} />
           {!collapsed &&
             TABS.map((tb) => (
               <button
@@ -505,6 +539,18 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
                 {counts[tb.id] > 0 && <span className="ml-1 text-muted-foreground">{counts[tb.id]}</span>}
               </button>
             ))}
+            <button
+            title={collapsed ? "Expand" : "Collapse"}
+            onClick={() => setCollapsed((c) => !c)}
+            className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground ml-auto"
+          >
+            <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              {collapsed
+                ? <><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></>
+                : <><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></>
+              }
+            </svg>
+          </button>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -512,7 +558,7 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
             !collapsed && (
               <div className="flex flex-col items-center justify-center gap-2 py-16 text-center text-muted-foreground">
                 <InboxIcon className="size-6" />
-                <p className="text-sm">No emails yet. Hit “Sync” to pull your inbox.</p>
+                <p className="text-sm">No emails yet. Hit &quot;Sync&quot; to pull your inbox.</p>
               </div>
             )
           ) : (
@@ -570,60 +616,57 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
         </div>
       </div>
 
-      {/* Reading pane — scrolls independently */}
+      {/* Reading pane */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {selected && (
-          <div className="flex shrink-0 items-center gap-0.5 border-b px-2 py-1.5">
-            <Button variant="ghost" size="icon-sm" title="Reply (R)" onClick={() => startReplyOrForward("reply")}>
-              <Reply className="size-4" />
-            </Button>
-            <Button variant="ghost" size="icon-sm" title="Forward (F)" onClick={() => startReplyOrForward("forward")}>
-              <Forward className="size-4" />
-            </Button>
-            <span className="mx-1 h-4 w-px bg-border" />
-            <Button variant="ghost" size="icon-sm" title="Archive (E)" onClick={() => undoableAct("archive")}>
-              <Archive className="size-4" />
-            </Button>
-            <Button variant="ghost" size="icon-sm" title="Star (S)" onClick={toggleStar}>
-              <Star className={cn("size-4", selected.isStarred && "fill-primary text-primary")} />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              title={selected.isRead ? "Mark unread (U)" : "Mark read (U)"}
-              onClick={toggleRead}
-            >
-              {selected.isRead ? <MailOpen className="size-4" /> : <Mail className="size-4" />}
-            </Button>
-            <DropdownMenu open={snoozeOpen} onOpenChange={setSnoozeOpen}>
-              <DropdownMenuTrigger
-                title="Snooze (H)"
-                className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }))}
+        <div className="flex shrink-0 items-center gap-0.5 border-b px-2 py-1.5">
+          {selected && (
+            <>
+              <Button variant="ghost" size="icon-sm" title="Reply (R)" onClick={() => startReplyOrForward("reply")}>
+                <Reply className="size-4" />
+              </Button>
+              <Button variant="ghost" size="icon-sm" title="Forward (F)" onClick={() => startReplyOrForward("forward")}>
+                <Forward className="size-4" />
+              </Button>
+              <span className="mx-1 h-4 w-px bg-border" />
+              <Button variant="ghost" size="icon-sm" title="Archive (E)" onClick={() => undoableAct("archive")}>
+                <Archive className="size-4" />
+              </Button>
+              <Button variant="ghost" size="icon-sm" title="Star (S)" onClick={toggleStar}>
+                <Star className={cn("size-4", selected.isStarred && "fill-primary text-primary")} />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                title={selected.isRead ? "Mark unread (U)" : "Mark read (U)"}
+                onClick={toggleRead}
               >
-                <Clock className="size-4" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-40">
-                {SNOOZE_PRESETS.map((p) => (
-                  <DropdownMenuItem key={p.label} onClick={() => doSnooze(p.ms)}>
-                    {p.label}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Button variant="ghost" size="icon-sm" title="Trash (#)" onClick={() => undoableAct("trash")}>
-              <Trash2 className="size-4" />
-            </Button>
-            <span className="mx-1 h-4 w-px bg-border" />
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              title="Email → Calendar (T)"
-              onClick={emailToCalendar}
-            >
-              <CalendarDays className="size-4" />
-            </Button>
-          </div>
-        )}
+                {selected.isRead ? <MailOpen className="size-4" /> : <Mail className="size-4" />}
+              </Button>
+              <DropdownMenu open={snoozeOpen} onOpenChange={setSnoozeOpen}>
+                <DropdownMenuTrigger
+                  title="Snooze (H)"
+                  className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }))}
+                >
+                  <Clock className="size-4" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-40">
+                  {SNOOZE_PRESETS.map((p) => (
+                    <DropdownMenuItem key={p.label} onClick={() => doSnooze(p.ms)}>
+                      {p.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button variant="ghost" size="icon-sm" title="Trash (#)" onClick={() => undoableAct("trash")}>
+                <Trash2 className="size-4" />
+              </Button>
+              <span className="mx-1 h-4 w-px bg-border" />
+              <Button variant="ghost" size="icon-sm" title="Email → Calendar (T)" onClick={emailToCalendar}>
+                <CalendarDays className="size-4" />
+              </Button>
+            </>
+          )}
+        </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           {!selectedId ? (
@@ -655,60 +698,77 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
           )}
         </div>
       </div>
+    </div>
+  );
 
-      {/* Calendar panel — collapsible right panel */}
-      <div
-        className={cn(
-          "flex min-h-0 shrink-0 flex-col overflow-hidden border-l transition-[width] duration-200 ease-out",
-          calOpen ? "w-80" : "w-0"
-        )}
-      >
-        {calOpen && (
+  return (
+    <div className="relative flex min-h-0 flex-1 overflow-hidden">
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} groups={paletteGroups} />
+      <SearchOverlay open={searchOpen} onOpenChange={setSearchOpen} onSelectThread={(id) => { setSelectedId(id); setMainView("inbox"); }} />
+      <ComposeModal key={composeKey} open={composeOpen} draft={composeDraft} onOpenChange={setComposeOpen} onSend={sendWithUndo} />
+      <NaturalInputBar open={naturalOpen} onOpenChange={setNaturalOpen} onResult={handleNaturalResult} />
+
+      {/* Left nav icon strip */}
+      <div className="flex w-14 shrink-0 flex-col items-center border-r py-3 gap-1">
+        <NavBtn
+          icon={<Bot className="size-5" />}
+          active={mainView === "agent"}
+          title="AI Assistant (⌘/)"
+          onClick={() => setMainView("agent")}
+        />
+        <NavBtn
+          icon={<InboxIcon className="size-5" />}
+          active={mainView === "inbox"}
+          title="Inbox"
+          onClick={() => setMainView("inbox")}
+        />
+        <NavBtn
+          icon={<CalendarDays className="size-5" />}
+          active={mainView === "calendar"}
+          title="Calendar"
+          onClick={() => { setMainView("calendar"); setCalSeed({}); }}
+        />
+        <NavBtn
+          icon={<CheckSquare className="size-5" />}
+          active={mainView === "actions"}
+          title="Action Board"
+          onClick={() => setMainView("actions")}
+        />
+        <NavBtn
+          icon={<Users className="size-5" />}
+          active={mainView === "contacts"}
+          title="Contacts"
+          onClick={() => setMainView("contacts")}
+        />
+
+        {/* Bottom actions */}
+        <div className="mt-auto flex flex-col items-center gap-1">
+          <NavBtn
+            icon={<Search className="size-5" />}
+            title="AI search (⌘F or /)"
+            onClick={() => setSearchOpen(true)}
+          />
+          <NavBtn
+            icon={<PenSquare className="size-5" />}
+            title="Compose (C)"
+            onClick={openCompose}
+          />
+          <DraftsMenu onOpenDraft={launchCompose} />
+        </div>
+      </div>
+
+      {/* Main content area — full width, switches between views */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {mainView === "agent" && <AgentSidebar />}
+        {mainView === "inbox" && inboxPane}
+        {mainView === "calendar" && (
           <CalendarSidebar
             key={`${calSeed.title}-${calSeed.startTime}`}
             initialSeed={calSeed}
           />
         )}
-      </div>
-
-      {/* Agent sidebar */}
-      {agentOpen && <AgentSidebar />}
-
-      {/* Action Board sidebar */}
-      {actionBoardOpen && <ActionBoard onClose={() => setActionBoardOpen(false)} />}
-
-      {/* Floating toggles — top-right of reading pane */}
-      <div className="absolute right-2 top-2 z-10 flex items-center gap-0.5">
-        <button
-          title="AI Assistant (⌘/)"
-          onClick={() => setAgentOpen(!agentOpen)}
-          className={cn(
-            "rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-            agentOpen && "text-primary"
-          )}
-        >
-          <Bot className="size-4" />
-        </button>
-        <button
-          title="Action Board"
-          onClick={() => setActionBoardOpen((o) => !o)}
-          className={cn(
-            "rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-            actionBoardOpen && "text-primary"
-          )}
-        >
-          <CheckSquare className="size-4" />
-        </button>
-        <button
-          title={calOpen ? "Close calendar" : "Open calendar"}
-          onClick={() => { setCalOpen((o) => !o); setCalSeed({}); }}
-          className={cn(
-            "rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-            calOpen && "text-primary"
-          )}
-        >
-          <CalendarDays className="size-4" />
-        </button>
+        {mainView === "actions" && <ActionBoard />}
+        {mainView === "contacts" && <ContactsView />}
       </div>
     </div>
   );

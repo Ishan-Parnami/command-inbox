@@ -10,14 +10,17 @@ export async function GET() {
   if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const userId = session.user.id;
 
-  const items = await db
-    .select()
-    .from(actionItems)
-    .where(and(eq(actionItems.userId, userId), eq(actionItems.isDone, false)))
-    .orderBy(desc(actionItems.createdAt))
-    .limit(50);
-
-  return NextResponse.json({ items });
+  try {
+    const items = await db
+      .select()
+      .from(actionItems)
+      .where(eq(actionItems.userId, userId))
+      .orderBy(desc(actionItems.createdAt))
+      .limit(50);
+    return NextResponse.json({ items });
+  } catch {
+    return NextResponse.json({ items: [] });
+  }
 }
 
 // POST /api/action-items — trigger extraction
@@ -42,6 +45,22 @@ export async function PATCH(req: Request) {
   await db
     .update(actionItems)
     .set({ isDone, updatedAt: new Date() })
+    .where(and(eq(actionItems.id, id), eq(actionItems.userId, userId)));
+
+  return NextResponse.json({ ok: true });
+}
+
+// DELETE /api/action-items?id=… — hard-delete an item
+export async function DELETE(req: Request) {
+  const session = await auth();
+  if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const userId = session.user.id;
+
+  const id = new URL(req.url).searchParams.get("id");
+  if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+
+  await db
+    .delete(actionItems)
     .where(and(eq(actionItems.id, id), eq(actionItems.userId, userId)));
 
   return NextResponse.json({ ok: true });

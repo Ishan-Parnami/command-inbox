@@ -16,13 +16,13 @@ export async function POST() {
   if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const userId = session.user.id;
 
-  const conns = await db
-    .select()
-    .from(corsairConnections)
-    .where(eq(corsairConnections.userId, userId));
-  if (!conns.some((c) => c.provider === "gmail")) return NextResponse.json({ created: 0 });
-
   try {
+    const conns = await db
+      .select()
+      .from(corsairConnections)
+      .where(eq(corsairConnections.userId, userId));
+    if (!conns.some((c) => c.provider === "gmail")) return NextResponse.json({ created: 0 });
+
     const { created } = await syncGmail(userId, 10);
     if (created > 0) {
       await classifyUnclassified(userId, created);
@@ -33,6 +33,9 @@ export async function POST() {
     if (e instanceof CorsairAuthError) {
       return NextResponse.json({ error: "reconnect", signInLink: e.signInLink }, { status: 409 });
     }
-    throw e;
+    // Transient DB/network blips (e.g. Neon "fetch failed") shouldn't surface as
+    // a 500 on a background poll — report zero new items and let the next tick retry.
+    console.error("[poll] transient error:", e);
+    return NextResponse.json({ created: 0 });
   }
 }

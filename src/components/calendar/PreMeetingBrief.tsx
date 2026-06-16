@@ -15,15 +15,22 @@ type CalendarEvent = {
 export function PreMeetingBrief({ event, onClose }: { event: CalendarEvent; onClose: () => void }) {
   const [brief, setBrief] = useState<string | null>(event.aiBrief ?? null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const generate = async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await fetch(`/api/brief/${event.id}`);
-      if (res.ok) {
-        const data = await res.json();
-        setBrief(data.brief ?? null);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.brief) {
+        setBrief(data.brief);
+      } else {
+        setError("Couldn't generate a full brief — showing what we have.");
+        if (data.brief) setBrief(data.brief);
       }
+    } catch {
+      setError("Brief generation is unavailable right now. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -50,11 +57,20 @@ export function PreMeetingBrief({ event, onClose }: { event: CalendarEvent; onCl
         </div>
       ) : brief ? (
         <div className="space-y-1">
+          {error && <p className="text-xs text-amber-600 dark:text-amber-400">{error}</p>}
           {brief.split("\n").filter(Boolean).map((line, i) => (
             <p key={i} className={cn("text-sm leading-snug", line.startsWith("•") ? "pl-1" : "")}>
               {line}
             </p>
           ))}
+        </div>
+      ) : error ? (
+        <div className="space-y-2 text-center">
+          <p className="text-xs text-amber-600 dark:text-amber-400">{error}</p>
+          <Button size="sm" variant="outline" onClick={generate}>
+            <Sparkles className="mr-1.5 size-3" />
+            Try again
+          </Button>
         </div>
       ) : (
         <div className="text-center">

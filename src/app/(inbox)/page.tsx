@@ -1,5 +1,4 @@
 import { eq } from "drizzle-orm";
-import { redirect } from "next/navigation";
 import { Command, Calendar } from "lucide-react";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
@@ -11,6 +10,7 @@ import { SyncButton } from "@/components/inbox/SyncButton";
 import { ConnectScreen } from "@/components/inbox/ConnectScreen";
 import { InboxView } from "@/components/inbox/InboxView";
 import { RealtimeListener } from "@/components/inbox/RealtimeListener";
+import { LandingPage } from "@/components/landing/LandingPage";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -21,7 +21,7 @@ export default async function InboxPage({
 }) {
   const { scope_error: scopeError } = await searchParams;
   const session = await auth();
-  if (!session?.user) redirect("/login");
+  if (!session?.user) return <LandingPage />;
   const userId = session.user.id;
 
   const conns = await db

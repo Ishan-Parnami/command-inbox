@@ -1,5 +1,6 @@
 import "server-only";
 import { createClient, type RunResult } from "@corsair-dev/app";
+import { parseSearchQuery } from "@/lib/search/query";
 
 // ── Hosted Corsair client (singleton) ─────────────────────────────────────────
 // Corsair stores OAuth tokens server-side per tenant.
@@ -64,9 +65,58 @@ export function getThread(userId: string, id: string) {
   return tenant(userId).run("gmail.api.threads.get", { id, format: "full" }).then(unwrap);
 }
 
-/** Corsair-cached local Gmail search (sub-second, no live Gmail round-trip). */
-export function searchCachedMessages(userId: string, query: string, limit = 20) {
-  return tenant(userId).run("gmail.db.messages.search", { query, limit }).then(unwrap);
+/**
+ * Corsair-cached local Gmail search (sub-second, no live Gmail round-trip).
+ * The synced DB filters by column with operators (no free-text "query" column),
+ * so we match `subject`/`body`/`from` with `contains` and merge unique results.
+ */
+export async function searchCachedMessages(
+  userId: string,
+  query: string,
+  limit = 20
+): Promise<Array<Record<string, unknown>>> {
+  const t = tenant(userId);
+  const { text, from } = parseSearchQuery(query);
+
+  type SearchSpec = { field: "subject" | "body" | "from"; value: string };
+  const specs: SearchSpec[] = [];
+
+  if (from) specs.push({ field: "from", value: from });
+  const freeText = text || (!from ? query : "");
+  if (freeText) {
+    specs.push({ field: "subject", value: freeText });
+    specs.push({ field: "body", value: freeText });
+    if (!from) specs.push({ field: "from", value: freeText });
+  }
+
+  const runSearch = async (field: SearchSpec["field"], value: string, strict: boolean) => {
+    const res = await t.run<Array<Record<string, unknown>>>("gmail.db.messages.search", {
+      data: { [field]: { contains: value } },
+      limit,
+    });
+    if (!res.success) {
+      if (strict) throw new CorsairAuthError(res.signInLink);
+      return [];
+    }
+    return res.data ?? [];
+  };
+
+  const batches = await Promise.all(
+    specs.map(({ field, value }, i) => runSearch(field, value, i === 0))
+  );
+
+  const seen = new Set<string>();
+  const merged: Array<Record<string, unknown>> = [];
+  for (const rows of batches) {
+    for (const row of rows) {
+      const key = typeof row.id === "string" ? row.id : JSON.stringify(row);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(row);
+      if (merged.length >= limit) return merged;
+    }
+  }
+  return merged;
 }
 
 /** Send a message. `raw` is an RFC-2822 message, base64url-encoded (Gmail contract). */
@@ -96,7 +146,7 @@ export function listEvents(
 }
 
 export function getEvent(userId: string, eventId: string, calendarId = "primary") {
-  return tenant(userId).run("googlecalendar.api.events.get", { calendarId, eventId }).then(unwrap);
+  return tenant(userId).run("googlecalendar.api.events.get", { calendarId, id: eventId }).then(unwrap);
 }
 
 export type CreateEventInput = {
@@ -107,21 +157,31 @@ export type CreateEventInput = {
   start: { dateTime: string; timeZone?: string };
   end: { dateTime: string; timeZone?: string };
   attendees?: { email: string }[];
-  addGoogleMeet?: boolean;
+  status?: "confirmed" | "tentative" | "cancelled";
 };
 
-export function createEvent(userId: string, input: CreateEventInput) {
-  const { calendarId = "primary", addGoogleMeet, ...event } = input;
-  return tenant(userId)
-    .run("googlecalendar.api.events.create", {
-      calendarId,
-      ...event,
-      conferenceDataVersion: addGoogleMeet ? 1 : undefined,
-      conferenceData: addGoogleMeet
-        ? { createRequest: { requestId: crypto.randomUUID() } }
-        : undefined,
-    })
-    .then(unwrap);
+export async function createEvent(userId: string, input: CreateEventInput) {
+  const { calendarId = "primary", ...event } = input;
+  const runInput = {
+    calendarId,
+    event,
+    // Email invites to all guests (otherwise Google creates the event silently).
+    sendUpdates: "all" as const,
+  };
+  console.log("[corsair:createEvent] request:", JSON.stringify({ userId, ...runInput }));
+  try {
+    const res = await tenant(userId).run("googlecalendar.api.events.create", runInput);
+    console.log("[corsair:createEvent] raw response:", JSON.stringify(res));
+    if (!res.success) {
+      console.error("[corsair:createEvent] failed (no success):", res);
+      throw new CorsairAuthError(res.signInLink);
+    }
+    return res.data;
+  } catch (e) {
+    if (e instanceof CorsairAuthError) throw e;
+    console.error("[corsair:createEvent] threw:", e instanceof Error ? { message: e.message, stack: e.stack, name: e.name } : e);
+    throw e;
+  }
 }
 
 export function updateEvent(
@@ -130,9 +190,19 @@ export function updateEvent(
   patch: Partial<CreateEventInput>,
   calendarId = "primary"
 ) {
-  return tenant(userId).run("googlecalendar.api.events.update", { calendarId, eventId, ...patch }).then(unwrap);
+  const { calendarId: _ignored, ...event } = patch;
+  return tenant(userId)
+    .run("googlecalendar.api.events.update", {
+      calendarId,
+      id: eventId,
+      event,
+      sendUpdates: "all",
+    })
+    .then(unwrap);
 }
 
 export function deleteEvent(userId: string, eventId: string, calendarId = "primary") {
-  return tenant(userId).run("googlecalendar.api.events.delete", { calendarId, eventId }).then(unwrap);
+  return tenant(userId)
+    .run("googlecalendar.api.events.delete", { calendarId, id: eventId, sendUpdates: "all" })
+    .then(unwrap);
 }

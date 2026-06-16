@@ -33,7 +33,7 @@ export function UserMenu() {
           <p className="truncate text-xs text-muted-foreground">{user?.email}</p>
         </div>
         <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" onClick={() => signOut({ callbackUrl: "/login" })}>
+        <DropdownMenuItem variant="destructive" onClick={() => signOut({ callbackUrl: "/" })}>
           <LogOut />
           Sign out
         </DropdownMenuItem>

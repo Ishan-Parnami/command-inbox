@@ -7,9 +7,11 @@ A Superhuman-style Gmail & Google Calendar command center. Built with **Next.js*
 ### Core
 - **Real-time Gmail & Calendar** — Instant sync via Corsair webhooks
 - **AI Priority Inbox** — Gemini classifies emails (Urgent → Normal → Low)
-- **Keyboard-first UI** — Full Vim keybindings (j/k, e for archive, c for compose)
+- **Keyboard-first UI** — Full Vim keybindings (j/k, e for archive, c for compose, n for natural compose)
+- **Natural Compose** — Press `N`, type "Lunch with Sara tomorrow 1pm" or "Email John about the sprint" → pre-filled event or compose
 - **Command Palette** — ⌘K for instant actions
 - **Action Board** — Auto-extracted to-dos from emails
+- **Contacts** — Full CRUD (add, rename, delete, VIP) with global alias resolution: saved names auto-resolve to emails in Mail, Calendar, and the AI assistant
 
 ### Advanced
 - **MCP Agent Chat** — Natural language: "Email X and create event" → executes both

@@ -24,6 +24,7 @@ export type PaletteGroup = { heading: string; items: PaletteCommand[] };
 // Static reference shown at the bottom — keys that aren't selectable commands.
 const NAV_HINTS: { keys: string; label: string }[] = [
   { keys: "J / K", label: "Next / previous email" },
+  { keys: "⌘ F or /", label: "AI search emails" },
   { keys: "⌘ K", label: "Open command palette" },
   { keys: "? or ⌘ K", label: "Keyboard shortcuts" },
 ];

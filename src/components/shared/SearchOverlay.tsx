@@ -39,11 +39,11 @@ export function SearchOverlay({
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (open) { setQuery(""); setHits([]); setFocused(0); setTimeout(() => inputRef.current?.focus(), 50); }
+    if (open) { setTimeout(() => { setQuery(""); setHits([]); setFocused(0); inputRef.current?.focus(); }, 50); }
   }, [open]);
 
   useEffect(() => {
-    if (!query.trim()) { setHits([]); return; }
+    if (!query.trim()) { setTimeout(() => { setHits([]); }, 50); return; }
     const id = setTimeout(async () => {
       setLoading(true);
       try {
@@ -63,7 +63,7 @@ export function SearchOverlay({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="top-1/4 translate-y-0 overflow-hidden p-0 sm:max-w-xl">
+      <DialogContent showCloseButton={false} className="top-1/4 translate-y-0 overflow-hidden p-0 sm:max-w-xl">
         <DialogHeader className="sr-only">
           <DialogTitle>Search emails</DialogTitle>
           <DialogDescription>Search across your inbox using AI, full-text, and live Gmail</DialogDescription>
@@ -98,7 +98,7 @@ export function SearchOverlay({
             <div className="py-6 text-center text-sm text-muted-foreground">Searching…</div>
           )}
           {!loading && query && hits.length === 0 && (
-            <div className="py-6 text-center text-sm text-muted-foreground">No results for "{query}"</div>
+            <div className="py-6 text-center text-sm text-muted-foreground">No results for &quot;{query}&quot;</div>
           )}
           {hits.map((h, i) => (
             <button
@@ -130,8 +130,17 @@ export function SearchOverlay({
         </div>
 
         {!loading && !query && (
-          <div className="px-4 py-4 text-xs text-muted-foreground space-y-1">
-            <p>Searches across <span className="text-primary font-medium">AI semantic</span>, full-text, and live Gmail simultaneously.</p>
+          <div className="px-4 py-4 text-xs text-muted-foreground space-y-1.5">
+            <p>
+              <span className="font-medium text-foreground">What is this?</span>{" "}
+              A unified search across your inbox — use natural language or keywords to find threads fast.
+            </p>
+            <p>
+              <span className="text-primary font-medium">AI</span> — semantic meaning (e.g. &quot;invoice from Acme&quot;) ·{" "}
+              <span className="font-medium">Text</span> — subject/body keyword match ·{" "}
+              <span className="font-medium text-green-700 dark:text-green-400">Live</span> — hits Gmail directly if not cached yet.
+            </p>
+            <p className="text-muted-foreground/80">Shortcut: ⌘F or /</p>
           </div>
         )}
       </DialogContent>

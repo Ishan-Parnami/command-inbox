@@ -401,6 +401,13 @@ export const calendarEventsRelations = relations(calendarEvents, ({ one, many })
   attendees: many(calendarEventAttendees),
 }));
 
+export const calendarEventAttendeesRelations = relations(calendarEventAttendees, ({ one }) => ({
+  event: one(calendarEvents, {
+    fields: [calendarEventAttendees.eventId],
+    references: [calendarEvents.id],
+  }),
+}));
+
 // ── Type exports ──────────────────────────────────────────────────────────────
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;

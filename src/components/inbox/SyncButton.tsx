@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 
 export function SyncButton() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
 
   async function sync() {
@@ -23,6 +25,11 @@ export function SyncButton() {
         throw new Error(data.error ?? "Sync failed");
       }
       toast.success(`Synced ${data.emails ?? 0} emails · ${data.events ?? 0} events`);
+      // Refetch client caches so newly synced items — and reconciled deletions
+      // (e.g. events removed in Google Calendar) — show up without a manual reload.
+      queryClient.invalidateQueries({ queryKey: ["events"] });
+      queryClient.invalidateQueries({ queryKey: ["threads"] });
+      queryClient.invalidateQueries({ queryKey: ["action-items"] });
       router.refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Sync failed");

@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { emails, emailVectors, emailThreads } from "@/lib/db/schema";
+import { emails, emailVectors } from "@/lib/db/schema";
 import { embed } from "@/lib/gemini/client";
 import { searchCachedMessages } from "@/lib/corsair/client";
-import { CorsairAuthError } from "@/lib/corsair/client";
+import { parseSearchQuery } from "@/lib/search/query";
 
 type Hit = {
   gmailMessageId: string;
@@ -19,6 +19,50 @@ type Hit = {
   score: number;
 };
 
+function mapCorsairRow(m: Record<string, unknown>): Hit | null {
+  const id = typeof m.id === "string" ? m.id : null;
+  if (!id) return null;
+
+  if (typeof m.subject === "string" || typeof m.from === "string") {
+    const fromRaw = typeof m.from === "string" ? m.from : null;
+    return {
+      gmailMessageId: id,
+      threadId: typeof m.threadId === "string" ? m.threadId : null,
+      subject: typeof m.subject === "string" ? m.subject : null,
+      snippet:
+        typeof m.snippet === "string"
+          ? m.snippet
+          : typeof m.body === "string"
+            ? m.body.slice(0, 200)
+            : null,
+      fromName: null,
+      fromEmail: fromRaw,
+      receivedAt:
+        typeof m.internalDate === "string"
+          ? new Date(Number(m.internalDate)).toISOString()
+          : null,
+      source: "corsair",
+      score: 0.5,
+    };
+  }
+
+  const payload = m.payload as { headers?: Array<{ name: string; value: string }> } | undefined;
+  const headers = payload?.headers ?? [];
+  const sub = headers.find((h) => h.name.toLowerCase() === "subject")?.value ?? null;
+  const from = headers.find((h) => h.name.toLowerCase() === "from")?.value ?? null;
+  return {
+    gmailMessageId: id,
+    threadId: typeof m.threadId === "string" ? m.threadId : null,
+    subject: sub,
+    snippet: typeof m.snippet === "string" ? m.snippet : null,
+    fromName: null,
+    fromEmail: from,
+    receivedAt: null,
+    source: "corsair",
+    score: 0.5,
+  };
+}
+
 export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -26,6 +70,8 @@ export async function GET(req: Request) {
 
   const q = new URL(req.url).searchParams.get("q")?.trim();
   if (!q) return NextResponse.json({ hits: [] });
+
+  const parsed = parseSearchQuery(q);
 
   const [vectorResult, ftsResult, corsairResult] = await Promise.allSettled([
     // Mode 1: pgvector cosine similarity (needs embeddings populated)
@@ -62,66 +108,88 @@ export async function GET(req: Request) {
       }));
     })(),
 
-    // Mode 2: Full-text search on subject + snippet
+    // Mode 2: Full-text + sender match on local DB
     (async (): Promise<Hit[]> => {
-      const rows = await db
-        .select({
-          id: emails.id,
-          gmailMessageId: emails.gmailMessageId,
-          threadId: emails.threadId,
-          subject: emails.subject,
-          snippet: emails.bodySnippet,
-          fromName: emails.fromName,
-          fromEmail: emails.fromEmail,
-          receivedAt: emails.receivedAt,
-          rank: sql<number>`ts_rank(
-            to_tsvector('english', coalesce(${emails.subject}, '') || ' ' || coalesce(${emails.bodySnippet}, '')),
-            plainto_tsquery('english', ${q})
-          )`,
-        })
-        .from(emails)
-        .where(
-          and(
-            eq(emails.userId, userId),
-            sql`to_tsvector('english', coalesce(${emails.subject}, '') || ' ' || coalesce(${emails.bodySnippet}, '')) @@ plainto_tsquery('english', ${q})`
-          )
-        )
-        .orderBy(sql`rank desc`)
-        .limit(10);
+      const hits: Hit[] = [];
 
-      return rows.map((e) => ({
-        gmailMessageId: e.gmailMessageId,
-        threadId: e.threadId,
-        subject: e.subject,
-        snippet: e.snippet,
-        fromName: e.fromName,
-        fromEmail: e.fromEmail,
-        receivedAt: e.receivedAt?.toISOString() ?? null,
-        source: "fts" as const,
-        score: e.rank,
-      }));
+      if (parsed.from) {
+        const pattern = `%${parsed.from}%`;
+        const senderRows = await db
+          .select()
+          .from(emails)
+          .where(
+            and(
+              eq(emails.userId, userId),
+              or(ilike(emails.fromEmail, pattern), ilike(emails.fromName, pattern))
+            )
+          )
+          .orderBy(sql`${emails.receivedAt} desc nulls last`)
+          .limit(10);
+
+        hits.push(
+          ...senderRows.map((e) => ({
+            gmailMessageId: e.gmailMessageId,
+            threadId: e.threadId,
+            subject: e.subject,
+            snippet: e.bodySnippet,
+            fromName: e.fromName,
+            fromEmail: e.fromEmail,
+            receivedAt: e.receivedAt?.toISOString() ?? null,
+            source: "fts" as const,
+            score: 1,
+          }))
+        );
+      }
+
+      const ftsQuery = parsed.text || (!parsed.from ? q : "");
+      if (ftsQuery) {
+        const rows = await db
+          .select({
+            id: emails.id,
+            gmailMessageId: emails.gmailMessageId,
+            threadId: emails.threadId,
+            subject: emails.subject,
+            snippet: emails.bodySnippet,
+            fromName: emails.fromName,
+            fromEmail: emails.fromEmail,
+            receivedAt: emails.receivedAt,
+            rank: sql<number>`ts_rank(
+              to_tsvector('english', coalesce(${emails.subject}, '') || ' ' || coalesce(${emails.bodySnippet}, '') || ' ' || coalesce(${emails.fromName}, '') || ' ' || coalesce(${emails.fromEmail}, '')),
+              plainto_tsquery('english', ${ftsQuery})
+            )`,
+          })
+          .from(emails)
+          .where(
+            and(
+              eq(emails.userId, userId),
+              sql`to_tsvector('english', coalesce(${emails.subject}, '') || ' ' || coalesce(${emails.bodySnippet}, '') || ' ' || coalesce(${emails.fromName}, '') || ' ' || coalesce(${emails.fromEmail}, '')) @@ plainto_tsquery('english', ${ftsQuery})`
+            )
+          )
+          .orderBy(sql`rank desc`)
+          .limit(10);
+
+        hits.push(
+          ...rows.map((e) => ({
+            gmailMessageId: e.gmailMessageId,
+            threadId: e.threadId,
+            subject: e.subject,
+            snippet: e.snippet,
+            fromName: e.fromName,
+            fromEmail: e.fromEmail,
+            receivedAt: e.receivedAt?.toISOString() ?? null,
+            source: "fts" as const,
+            score: e.rank,
+          }))
+        );
+      }
+
+      return hits;
     })(),
 
-    // Mode 3: Corsair-cached live Gmail search
+    // Mode 3: Corsair-cached Gmail search
     (async (): Promise<Hit[]> => {
-      const res = (await searchCachedMessages(userId, q, 10)) as { messages?: Array<{ id: string; threadId: string; snippet?: string; payload?: { headers?: Array<{ name: string; value: string }> } }> };
-      const msgs = res.messages ?? [];
-      return msgs.map((m) => {
-        const headers = m.payload?.headers ?? [];
-        const sub = headers.find((h: { name: string }) => h.name.toLowerCase() === "subject")?.value ?? null;
-        const from = headers.find((h: { name: string }) => h.name.toLowerCase() === "from")?.value ?? null;
-        return {
-          gmailMessageId: m.id,
-          threadId: m.threadId ?? null,
-          subject: sub,
-          snippet: m.snippet ?? null,
-          fromName: null,
-          fromEmail: from,
-          receivedAt: null,
-          source: "corsair" as const,
-          score: 0.5,
-        };
-      });
+      const rows = await searchCachedMessages(userId, q, 10);
+      return rows.map(mapCorsairRow).filter((h): h is Hit => h !== null);
     })(),
   ]);
 
@@ -147,10 +215,17 @@ export async function GET(req: Request) {
     const emailRows = await db
       .select({ gmailMessageId: emails.gmailMessageId, threadId: emails.threadId })
       .from(emails)
-      .where(and(eq(emails.userId, userId), sql`${emails.gmailMessageId} = ANY(${gmailIds})`));
+      .where(and(eq(emails.userId, userId), inArray(emails.gmailMessageId, gmailIds)));
     const idMap = Object.fromEntries(emailRows.map((e) => [e.gmailMessageId, e.threadId]));
     for (const h of hits) if (!h.threadId && idMap[h.gmailMessageId]) h.threadId = idMap[h.gmailMessageId];
   }
 
-  return NextResponse.json({ hits, sources: { vector: vectorResult.status === "fulfilled", fts: ftsResult.status === "fulfilled", corsair: corsairResult.status === "fulfilled" && !(corsairResult.value instanceof CorsairAuthError) } });
+  return NextResponse.json({
+    hits,
+    sources: {
+      vector: vectorResult.status === "fulfilled",
+      fts: ftsResult.status === "fulfilled",
+      corsair: corsairResult.status === "fulfilled",
+    },
+  });
 }

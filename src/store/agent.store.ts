@@ -22,6 +22,7 @@ interface AgentStore {
   appendToolCall: (msgId: string, tool: string) => void;
   resolveToolCall: (msgId: string, tool: string, result: unknown) => void;
   setConversationId: (id: string) => void;
+  loadConversation: (id: string, messages: AgentMessage[]) => void;
   reset: () => void;
 }
 
@@ -62,5 +63,6 @@ export const useAgentStore = create<AgentStore>((set) => ({
       ),
     })),
   setConversationId: (id) => set({ conversationId: id }),
+  loadConversation: (id, messages) => set({ conversationId: id, messages, isStreaming: false }),
   reset: () => set({ messages: [], conversationId: null, isStreaming: false }),
 }));

@@ -3,6 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { emailThreads, emails } from "@/lib/db/schema";
 import { listMessages, getMessage } from "@/lib/corsair/client";
+import { upsertContacts } from "@/lib/sync/contacts";
 
 // Backfill: pull recent inbox messages from Corsair (native Gmail REST shape) and
 // upsert them into email_threads + emails. Idempotent — safe to re-run.
@@ -142,7 +143,13 @@ export async function syncGmail(
       .returning({ id: emails.id });
 
     processed++;
-    if (inserted.length) created++;
+    if (inserted.length) {
+      created++;
+      // Upsert contact for this sender (fire-and-forget, non-fatal).
+      if (from.email) {
+        upsertContacts(userId, [{ email: from.email, name: from.name ?? null, receivedAt }]).catch(() => {});
+      }
+    }
   }
 
   return { processed, created };

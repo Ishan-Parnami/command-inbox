@@ -1,17 +1,119 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Bot, Send, X, ChevronDown, Wrench } from "lucide-react";
+import { Bot, Send, X, Wrench, History, Plus, Loader2, Trash2 } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { useAgentStore } from "@/store/agent.store";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { useAgentStore, type AgentMessage } from "@/store/agent.store";
+import {
+  useContactSuggestions,
+  applyAgentContactToken,
+  type Contact,
+} from "@/hooks/useContactSuggestions";
+
+type ConversationSummary = { id: string; title: string; count: number; updatedAt: string };
+
+function AgentContactSuggestions({
+  suggestions,
+  onPick,
+}: {
+  suggestions: Contact[];
+  onPick: (contact: Contact) => void;
+}) {
+  if (suggestions.length === 0) return null;
+  return (
+    <ul className="absolute bottom-full left-0 right-0 z-50 mb-1 max-h-40 overflow-auto rounded-md border bg-popover py-1 shadow-md">
+      {suggestions.map((c) => (
+        <li key={c.email}>
+          <button
+            type="button"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              onPick(c);
+            }}
+            className="flex w-full flex-col items-start px-3 py-1.5 text-left text-sm hover:bg-accent"
+          >
+            <span className="font-medium">{c.name || c.email}</span>
+            {c.name && <span className="text-xs text-muted-foreground">{c.email}</span>}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 export function AgentSidebar() {
-  const { isOpen, isStreaming, messages, conversationId, setOpen, setStreaming, addMessage, updateLastMessage, appendToolCall, resolveToolCall, setConversationId, reset } = useAgentStore();
+  const { isStreaming, messages, conversationId, setStreaming, addMessage, updateLastMessage, appendToolCall, resolveToolCall, setConversationId, loadConversation, reset } = useAgentStore();
   const [input, setInput] = useState("");
+  const [inputFocused, setInputFocused] = useState(false);
+  const contactSuggestions = useContactSuggestions(input, "@");
+  const [history, setHistory] = useState<ConversationSummary[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<ConversationSummary | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  const loadHistory = async () => {
+    setHistoryLoading(true);
+    try {
+      const res = await fetch("/api/agent/conversations");
+      const data = await res.json();
+      setHistory(data.conversations ?? []);
+    } catch {
+      setHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const openConversation = async (id: string) => {
+    try {
+      const res = await fetch(`/api/agent/conversations/${id}`);
+      if (!res.ok) return;
+      const data = (await res.json()) as { id: string; messages: Array<{ role: string; content: unknown }> };
+      const msgs: AgentMessage[] = (data.messages ?? []).map((m) => ({
+        id: crypto.randomUUID(),
+        role: m.role === "assistant" ? "assistant" : "user",
+        content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+      }));
+      loadConversation(data.id, msgs);
+      scrollToBottom();
+    } catch {
+      // ignore — keep current conversation
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await fetch(`/api/agent/conversations/${deleteTarget.id}`, { method: "DELETE" });
+      setHistory((h) => h.filter((c) => c.id !== deleteTarget.id));
+      if (deleteTarget.id === conversationId) reset();
+    } catch {
+      // ignore — leave history as-is
+    } finally {
+      setDeleting(false);
+      setDeleteTarget(null);
+    }
+  };
 
   const scrollToBottom = () => setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
 
@@ -31,18 +133,32 @@ export function AgentSidebar() {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
 
+    const reqPayload = {
+      message: text,
+      conversationId,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    };
+    console.log("[agent:client] send →", reqPayload);
+
     try {
       const res = await fetch("/api/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, conversationId }),
+        body: JSON.stringify(reqPayload),
         signal: ctrl.signal,
       });
-      if (!res.ok || !res.body) throw new Error("Agent request failed");
+      console.log("[agent:client] response status:", res.status, res.statusText);
+      if (!res.ok || !res.body) {
+        const errBody = await res.text().catch(() => "");
+        console.error("[agent:client] request failed:", { status: res.status, body: errBody });
+        throw new Error(`Agent request failed (${res.status})`);
+      }
 
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       let buf = "";
+      let assistantText = "";
+      let errored = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -52,24 +168,49 @@ export function AgentSidebar() {
         buf = lines.pop() ?? "";
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
-          const ev = JSON.parse(line.slice(6));
+          let ev: Record<string, unknown>;
+          try {
+            ev = JSON.parse(line.slice(6));
+          } catch (parseErr) {
+            console.error("[agent:client] SSE parse error:", { line, parseErr });
+            continue;
+          }
+          console.log("[agent:client] SSE event:", ev);
           if (ev.type === "text") {
-            updateLastMessage(
-              (messages.find((m) => m.id === assistantId)?.content ?? "") + ev.chunk
-            );
+            assistantText += ev.chunk;
+            updateLastMessage(assistantText);
             scrollToBottom();
           } else if (ev.type === "tool_start") {
-            appendToolCall(assistantId, ev.tool);
+            console.log("[agent:client] tool_start:", ev.tool);
+            appendToolCall(assistantId, ev.tool as string);
           } else if (ev.type === "tool_done") {
-            resolveToolCall(assistantId, ev.tool, ev.result);
+            console.log("[agent:client] tool_done:", ev.tool, ev.result);
+            resolveToolCall(assistantId, ev.tool as string, ev.result);
+          } else if (ev.type === "error") {
+            errored = true;
+            console.error("[agent:client] server error event:", ev.message, ev);
+            assistantText = "Sorry, something went wrong handling that. Please try again.";
+            updateLastMessage(assistantText);
           } else if (ev.type === "done" && ev.conversationId) {
-            setConversationId(ev.conversationId);
+            console.log("[agent:client] done, conversationId:", ev.conversationId);
+            setConversationId(ev.conversationId as string);
           }
         }
       }
+
+      console.log("[agent:client] stream complete:", { errored, assistantTextLength: assistantText.length });
+
+      // Guarantee a non-empty bubble even if the stream sent no text.
+      if (!errored && !assistantText.trim()) {
+        console.warn("[agent:client] empty assistant reply — using fallback");
+        updateLastMessage("Done. Let me know if you need anything else.");
+      }
     } catch (e) {
       if ((e as Error).name !== "AbortError") {
+        console.error("[agent:client] fetch/stream error:", e);
         updateLastMessage("Sorry, something went wrong. Please try again.");
+      } else {
+        console.log("[agent:client] aborted by user");
       }
     } finally {
       setStreaming(false);
@@ -78,10 +219,8 @@ export function AgentSidebar() {
     }
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="flex h-full w-80 shrink-0 flex-col border-l bg-background">
+    <div className="flex h-full flex-col bg-background">
       {/* Header */}
       <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5">
         <div className="flex items-center gap-2 text-sm font-semibold">
@@ -89,14 +228,57 @@ export function AgentSidebar() {
           AI Assistant
         </div>
         <div className="flex items-center gap-1">
+          <DropdownMenu onOpenChange={(o) => o && loadHistory()}>
+            <DropdownMenuTrigger
+              title="Chat history"
+              className={cn(
+                "inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              )}
+            >
+              <History className="size-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="max-h-80 w-72 overflow-y-auto">
+              <div className="px-1.5 py-1 text-xs font-medium text-muted-foreground">Chat history</div>
+              {historyLoading ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2 className="size-4 animate-spin text-muted-foreground" />
+                </div>
+              ) : history.length === 0 ? (
+                <p className="px-2 py-3 text-center text-xs text-muted-foreground">No past conversations.</p>
+              ) : (
+                history.map((c) => (
+                  <DropdownMenuItem
+                    key={c.id}
+                    onClick={() => openConversation(c.id)}
+                    className={cn("flex items-center gap-2", c.id === conversationId && "bg-muted")}
+                  >
+                    <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                      <span className="line-clamp-1 text-sm">{c.title}</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {c.count} messages · {formatDistanceToNow(new Date(c.updatedAt), { addSuffix: true })}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      title="Delete conversation"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteTarget(c);
+                      }}
+                      className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </DropdownMenuItem>
+                ))
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
           {messages.length > 0 && (
             <Button variant="ghost" size="icon-sm" title="New conversation" onClick={reset}>
-              <ChevronDown className="size-4 rotate-90" />
+              <Plus className="size-4" />
             </Button>
           )}
-          <Button variant="ghost" size="icon-sm" onClick={() => setOpen(false)}>
-            <X className="size-4" />
-          </Button>
         </div>
       </div>
 
@@ -109,7 +291,7 @@ export function AgentSidebar() {
               <p className="text-sm font-medium">Ask me anything</p>
               <p className="text-xs">Search emails, create events,<br />draft replies, and more.</p>
             </div>
-            <div className="space-y-1.5 w-full">
+            <div className="space-y-1.5 w-1/2 md:w-1/3">
               {[
                 "Summarize my unread emails",
                 "Schedule a meeting tomorrow at 2pm",
@@ -118,7 +300,7 @@ export function AgentSidebar() {
                 <button
                   key={s}
                   onClick={() => { setInput(s); }}
-                  className="w-full rounded-md border px-3 py-1.5 text-left text-xs hover:bg-muted transition-colors"
+                  className="w-full text-center rounded-md border px-3 py-1.5 text-xs hover:bg-muted transition-colors"
                 >
                   {s}
                 </button>
@@ -131,7 +313,7 @@ export function AgentSidebar() {
           <div key={m.id} className={cn("flex flex-col gap-1", m.role === "user" && "items-end")}>
             <div
               className={cn(
-                "max-w-[90%] rounded-xl px-3 py-2 text-sm",
+                "max-w-[50%] w-fit rounded-xl px-3 py-2 text-sm",
                 m.role === "user"
                   ? "bg-primary text-primary-foreground"
                   : "bg-muted text-foreground"
@@ -167,14 +349,22 @@ export function AgentSidebar() {
 
       {/* Input */}
       <div className="shrink-0 border-t p-3">
-        <div className="flex items-end gap-2">
+        <div className="relative flex items-end gap-2">
+          {inputFocused && contactSuggestions.suggestions.length > 0 && (
+            <AgentContactSuggestions
+              suggestions={contactSuggestions.suggestions}
+              onPick={(c) => setInput(applyAgentContactToken(input, c))}
+            />
+          )}
           <Textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onFocus={() => setInputFocused(true)}
+            onBlur={() => setInputFocused(false)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
             }}
-            placeholder="Ask anything… (↵ send, ⇧↵ newline)"
+            placeholder="Ask anything… type @ for contacts (↵ send, ⇧↵ newline)"
             className="min-h-[60px] resize-none text-sm"
             disabled={isStreaming}
           />
@@ -188,6 +378,25 @@ export function AgentSidebar() {
           </Button>
         </div>
       </div>
+
+      <Dialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete conversation?</DialogTitle>
+            <DialogDescription className="line-clamp-2">
+              “{deleteTarget?.title}” will be permanently removed. This can’t be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setDeleteTarget(null)} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
+              {deleting ? "Deleting…" : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

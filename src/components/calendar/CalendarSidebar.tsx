@@ -3,10 +3,20 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, isToday, isTomorrow } from "date-fns";
-import { Calendar, Plus, ExternalLink, Users } from "lucide-react";
+import { Calendar, Plus, ExternalLink, Users, X, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { CreateEventModal, type EventSeed } from "@/components/calendar/CreateEventModal";
+import { PreMeetingBrief } from "@/components/calendar/PreMeetingBrief";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 type Attendee = { email: string; name: string | null; rsvpStatus: string; isOrganizer: boolean };
 
@@ -20,6 +30,7 @@ type CalEvent = {
   location: string | null;
   description: string | null;
   status: string;
+  aiBrief: string | null;
   attendees: Attendee[];
 };
 
@@ -49,10 +60,12 @@ function groupByDay(events: CalEvent[]) {
   return map;
 }
 
-export function CalendarSidebar({ initialSeed }: { initialSeed?: EventSeed }) {
+export function CalendarSidebar({ initialSeed, onClose }: { initialSeed?: EventSeed; onClose?: () => void; }) {
   const [createOpen, setCreateOpen] = useState(!!initialSeed?.startTime);
   const [seed, setSeed] = useState<EventSeed>(initialSeed ?? {});
+  const [editId, setEditId] = useState<string | undefined>(undefined);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [briefEvent, setBriefEvent] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery({
@@ -69,8 +82,48 @@ export function CalendarSidebar({ initialSeed }: { initialSeed?: EventSeed }) {
   const grouped = groupByDay(events);
 
   const openCreate = (s: EventSeed = {}) => {
+    setEditId(undefined);
     setSeed(s);
     setCreateOpen(true);
+  };
+
+  const openReschedule = (ev: CalEvent) => {
+    setEditId(ev.id);
+    setSeed({
+      title: ev.title ?? "",
+      description: ev.description ?? undefined,
+      location: ev.location ?? undefined,
+      startTime: ev.startTime ?? undefined,
+      endTime: ev.endTime ?? undefined,
+      attendees: ev.attendees.map((a) => a.email).join(", "),
+    });
+    setCreateOpen(true);
+  };
+
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CalEvent | null>(null);
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    const ev = deleteTarget;
+    setDeleteTarget(null);
+    setDeletingId(ev.id);
+    try {
+      const res = await fetch(`/api/events/${ev.id}`, { method: "DELETE" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (body.signInLink) {
+          window.location.href = body.signInLink;
+          return;
+        }
+        throw new Error(body.error ?? "Delete failed");
+      }
+      toast.success("Event deleted");
+      queryClient.invalidateQueries({ queryKey: ["events"] });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   return (
@@ -80,9 +133,16 @@ export function CalendarSidebar({ initialSeed }: { initialSeed?: EventSeed }) {
           <Calendar className="size-4 text-primary" />
           Calendar
         </div>
-        <Button size="icon-sm" variant="ghost" title="New event (T)" onClick={() => openCreate()}>
-          <Plus className="size-4" />
-        </Button>
+        <div className="flex items-center gap-0.5">
+          <Button size="icon-sm" variant="ghost" title="New event (T)" onClick={() => openCreate()}>
+            <Plus className="size-4" />
+          </Button>
+          {onClose && (
+            <Button size="icon-sm" variant="ghost" title="Close calendar" onClick={onClose}>
+              <X className="size-4" />
+            </Button>
+          )}
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -141,18 +201,33 @@ export function CalendarSidebar({ initialSeed }: { initialSeed?: EventSeed }) {
                             )}
                             <button
                               className="text-primary hover:underline"
-                              onClick={() =>
-                                openCreate({
-                                  title: `Re: ${ev.title ?? ""}`.trim(),
-                                  startTime: ev.startTime ?? undefined,
-                                  endTime: ev.endTime ?? undefined,
-                                  attendees: ev.attendees.map((a) => a.email).join(", "),
-                                })
-                              }
+                              onClick={() => setBriefEvent(briefEvent === ev.id ? null : ev.id)}
                             >
-                              + follow-up
+                              ✦ brief
+                            </button>
+                            <button
+                              className="text-primary hover:underline"
+                              onClick={() => openReschedule(ev)}
+                            >
+                              reschedule
+                            </button>
+                            <button
+                              className="ml-auto flex items-center gap-1 text-destructive hover:underline disabled:opacity-50"
+                              disabled={deletingId === ev.id}
+                              onClick={() => setDeleteTarget(ev)}
+                            >
+                              <Trash2 className="size-3" />
+                              {deletingId === ev.id ? "deleting…" : "delete"}
                             </button>
                           </div>
+                          {briefEvent === ev.id && (
+                            <div className="pt-2">
+                              <PreMeetingBrief
+                                event={{ id: ev.id, title: ev.title, startTime: ev.startTime, aiBrief: ev.aiBrief }}
+                                onClose={() => setBriefEvent(null)}
+                              />
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -165,11 +240,28 @@ export function CalendarSidebar({ initialSeed }: { initialSeed?: EventSeed }) {
       </div>
 
       <CreateEventModal
+        key={editId ?? "new"}
         open={createOpen}
         seed={seed}
+        eventId={editId}
         onOpenChange={setCreateOpen}
         onCreated={() => queryClient.invalidateQueries({ queryKey: ["events"] })}
       />
+
+      <Dialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete event?</DialogTitle>
+            <DialogDescription>
+              “{deleteTarget?.title ?? "This event"}” will be removed from Google Calendar too. This can’t be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={confirmDelete}>Delete</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -23,7 +23,7 @@ export default async function LoginPage() {
             <div className="space-y-1">
               <h1 className="text-xl font-semibold tracking-tight">Command Inbox</h1>
               <p className="text-sm text-muted-foreground">
-                A keyboard-first command center for Gmail &amp; Calendar.
+                A keyboard-first AI powered command center for Gmail &amp; Google Calendar.
               </p>
             </div>
           </div>

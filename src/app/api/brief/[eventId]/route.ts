@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { and, desc, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { calendarEvents, emails } from "@/lib/db/schema";
+import { calendarEvents, calendarEventAttendees, emails } from "@/lib/db/schema";
 import { generateText } from "@/lib/gemini/client";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ eventId: string }> }) {
@@ -11,11 +11,16 @@ export async function GET(_req: Request, { params }: { params: Promise<{ eventId
   const userId = session.user.id;
   const { eventId } = await params;
 
-  const event = await db.query.calendarEvents.findFirst({
-    where: and(eq(calendarEvents.id, eventId), eq(calendarEvents.userId, userId)),
-    with: { attendees: true },
-  });
+  const [event] = await db
+    .select()
+    .from(calendarEvents)
+    .where(and(eq(calendarEvents.id, eventId), eq(calendarEvents.userId, userId)));
   if (!event) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  const attendees = await db
+    .select({ email: calendarEventAttendees.email, name: calendarEventAttendees.name })
+    .from(calendarEventAttendees)
+    .where(eq(calendarEventAttendees.eventId, eventId));
 
   // Return cached brief if fresh (< 6 hours).
   if (event.aiBrief && event.briefGeneratedAt) {
@@ -24,7 +29,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ eventId
   }
 
   // Gather attendee emails (excluding self).
-  const attendeeEmails = (event.attendees ?? [])
+  const attendeeEmails = attendees
     .map((a) => a.email)
     .filter((e): e is string => !!e && e !== session.user!.email);
 
@@ -64,13 +69,37 @@ Write a concise pre-meeting brief (3-5 bullet points) covering:
 
 Keep it under 200 words. Plain text, use • bullets.`;
 
-  const brief = await generateText(prompt);
+  // Build a fallback brief from whatever data we have, so the feature never
+  // fails flat even when the model is unavailable or returns nothing.
+  const fallbackBrief = [
+    `• ${event.title ?? "Meeting"}${event.startTime ? ` — ${event.startTime.toISOString()}` : ""}`,
+    attendeeEmails.length ? `• Attendees: ${attendeeEmails.join(", ")}` : "• No attendees listed",
+    event.description ? `• Notes: ${event.description.slice(0, 200)}` : null,
+    emailContext ? "• Recent email context with attendees is available." : "• No recent email context found.",
+    "• AI summary unavailable right now — showing event details only.",
+  ]
+    .filter(Boolean)
+    .join("\n");
 
-  // Cache in DB.
-  await db
-    .update(calendarEvents)
-    .set({ aiBrief: brief, briefGeneratedAt: new Date(), updatedAt: new Date() })
-    .where(eq(calendarEvents.id, eventId));
+  let brief = "";
+  let degraded = false;
+  try {
+    brief = (await generateText(prompt)).trim();
+  } catch {
+    degraded = true;
+  }
+  if (!brief) {
+    brief = fallbackBrief;
+    degraded = true;
+  }
 
-  return NextResponse.json({ brief, cached: false });
+  // Only cache successful AI briefs (don't persist the degraded fallback).
+  if (!degraded) {
+    await db
+      .update(calendarEvents)
+      .set({ aiBrief: brief, briefGeneratedAt: new Date(), updatedAt: new Date() })
+      .where(eq(calendarEvents.id, eventId));
+  }
+
+  return NextResponse.json({ brief, cached: false, degraded });
 }
