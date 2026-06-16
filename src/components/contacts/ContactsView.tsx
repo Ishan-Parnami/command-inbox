@@ -244,7 +244,7 @@ export function ContactsView() {
 
                   {/* Edit / delete */}
                   <td className="px-4 py-3">
-                    <div className="flex items-center justify-center gap-1">
+                    <div className="flex items-center justify-center gap-3">
                       <button
                         onClick={() => setEditor({ id: c.id, email: c.email, name: c.name ?? "" })}
                         title="Edit name"

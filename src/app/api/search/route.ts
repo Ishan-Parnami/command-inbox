@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { and, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { emails, emailVectors } from "@/lib/db/schema";
+import { emails, emailVectors, emailThreads } from "@/lib/db/schema";
 import { embed } from "@/lib/gemini/client";
 import { searchCachedMessages } from "@/lib/corsair/client";
 import { parseSearchQuery } from "@/lib/search/query";
@@ -10,6 +10,7 @@ import { parseSearchQuery } from "@/lib/search/query";
 type Hit = {
   gmailMessageId: string;
   threadId: string | null;
+  gmailThreadId: string | null;
   subject: string | null;
   snippet: string | null;
   fromName: string | null;
@@ -27,7 +28,8 @@ function mapCorsairRow(m: Record<string, unknown>): Hit | null {
     const fromRaw = typeof m.from === "string" ? m.from : null;
     return {
       gmailMessageId: id,
-      threadId: typeof m.threadId === "string" ? m.threadId : null,
+      threadId: null,
+      gmailThreadId: typeof m.threadId === "string" ? m.threadId : null,
       subject: typeof m.subject === "string" ? m.subject : null,
       snippet:
         typeof m.snippet === "string"
@@ -52,7 +54,8 @@ function mapCorsairRow(m: Record<string, unknown>): Hit | null {
   const from = headers.find((h) => h.name.toLowerCase() === "from")?.value ?? null;
   return {
     gmailMessageId: id,
-    threadId: typeof m.threadId === "string" ? m.threadId : null,
+    threadId: null,
+    gmailThreadId: typeof m.threadId === "string" ? m.threadId : null,
     subject: sub,
     snippet: typeof m.snippet === "string" ? m.snippet : null,
     fromName: null,
@@ -98,6 +101,7 @@ export async function GET(req: Request) {
       return emailRows.map((e) => ({
         gmailMessageId: e.gmailMessageId,
         threadId: e.threadId,
+        gmailThreadId: null,
         subject: e.subject,
         snippet: e.bodySnippet,
         fromName: e.fromName,
@@ -130,6 +134,7 @@ export async function GET(req: Request) {
           ...senderRows.map((e) => ({
             gmailMessageId: e.gmailMessageId,
             threadId: e.threadId,
+            gmailThreadId: null,
             subject: e.subject,
             snippet: e.bodySnippet,
             fromName: e.fromName,
@@ -172,6 +177,7 @@ export async function GET(req: Request) {
           ...rows.map((e) => ({
             gmailMessageId: e.gmailMessageId,
             threadId: e.threadId,
+            gmailThreadId: null,
             subject: e.subject,
             snippet: e.snippet,
             fromName: e.fromName,
@@ -209,7 +215,7 @@ export async function GET(req: Request) {
 
   const hits = [...merged.values()].sort((a, b) => b.score - a.score).slice(0, 20);
 
-  // Resolve threadId (our internal uuid) from emails table for threading.
+  // Resolve internal thread UUID (emails.thread_id), not Gmail's thread id string.
   const gmailIds = hits.map((h) => h.gmailMessageId);
   if (gmailIds.length) {
     const emailRows = await db
@@ -217,11 +223,29 @@ export async function GET(req: Request) {
       .from(emails)
       .where(and(eq(emails.userId, userId), inArray(emails.gmailMessageId, gmailIds)));
     const idMap = Object.fromEntries(emailRows.map((e) => [e.gmailMessageId, e.threadId]));
-    for (const h of hits) if (!h.threadId && idMap[h.gmailMessageId]) h.threadId = idMap[h.gmailMessageId];
+    for (const h of hits) if (idMap[h.gmailMessageId]) h.threadId = idMap[h.gmailMessageId];
   }
 
+  const unresolvedGmailThreadIds = [
+    ...new Set(hits.filter((h) => !h.threadId && h.gmailThreadId).map((h) => h.gmailThreadId!)),
+  ];
+  if (unresolvedGmailThreadIds.length) {
+    const threadRows = await db
+      .select({ id: emailThreads.id, gmailThreadId: emailThreads.gmailThreadId })
+      .from(emailThreads)
+      .where(and(eq(emailThreads.userId, userId), inArray(emailThreads.gmailThreadId, unresolvedGmailThreadIds)));
+    const threadMap = Object.fromEntries(threadRows.map((t) => [t.gmailThreadId, t.id]));
+    for (const h of hits) {
+      if (!h.threadId && h.gmailThreadId && threadMap[h.gmailThreadId]) {
+        h.threadId = threadMap[h.gmailThreadId];
+      }
+    }
+  }
+
+  const publicHits = hits.map(({ gmailThreadId: _g, score: _s, ...h }) => h);
+
   return NextResponse.json({
-    hits,
+    hits: publicHits,
     sources: {
       vector: vectorResult.status === "fulfilled",
       fts: ftsResult.status === "fulfilled",

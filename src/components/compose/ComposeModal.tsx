@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { ChevronDown, Clock, Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -22,9 +21,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   useContactSuggestions,
-  applyContactToken,
+  applyContactMention,
+  parseRecipientField,
+  hasUnresolvedRecipients,
   type Contact,
 } from "@/hooks/useContactSuggestions";
+import {
+  ContactSuggestionList,
+  useContactSuggestionKeyboard,
+} from "@/components/shared/ContactSuggestionList";
 
 export type ComposeDraft = {
   id?: string; // existing draft row being restored/edited
@@ -45,8 +50,6 @@ export type SendPayload = {
   scheduledAt?: string;
 };
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 const SCHEDULE_PRESETS: { label: string; at: () => Date }[] = [
   { label: "In 1 hour", at: () => new Date(Date.now() + 60 * 60_000) },
   { label: "In 3 hours", at: () => new Date(Date.now() + 180 * 60_000) },
@@ -60,39 +63,6 @@ const SCHEDULE_PRESETS: { label: string; at: () => Date }[] = [
     },
   },
 ];
-
-const splitEmails = (s: string) =>
-  s.split(",").map((e) => e.trim()).filter(Boolean);
-
-function ContactSuggestions({
-  suggestions,
-  onPick,
-}: {
-  suggestions: Contact[];
-  onPick: (email: string) => void;
-}) {
-  if (suggestions.length === 0) return null;
-  return (
-    <ul className="absolute left-0 right-0 top-full z-50 mt-0.5 max-h-48 overflow-auto rounded-md border bg-popover py-1 shadow-md">
-      {suggestions.map((c) => (
-        <li key={c.email}>
-          <button
-            type="button"
-            // onMouseDown fires before the input's blur, so the pick lands.
-            onMouseDown={(e) => {
-              e.preventDefault();
-              onPick(c.email);
-            }}
-            className="flex w-full flex-col items-start px-3 py-1.5 text-left text-sm hover:bg-accent"
-          >
-            <span className="font-medium">{c.name || c.email}</span>
-            {c.name && <span className="text-xs text-muted-foreground">{c.email}</span>}
-          </button>
-        </li>
-      ))}
-    </ul>
-  );
-}
 
 // Remounted via `key` on each open, so useState seeds straight from `draft`.
 export function ComposeModal({
@@ -116,38 +86,24 @@ export function ComposeModal({
 
   const toSuggestions = useContactSuggestions(to);
   const ccSuggestions = useContactSuggestions(cc);
+  const pickTo = (c: Contact) => setTo(applyContactMention(to, c, ", "));
+  const pickCc = (c: Contact) => setCc(applyContactMention(cc, c, ", "));
+  const toKb = useContactSuggestionKeyboard(
+    toSuggestions.suggestions,
+    pickTo,
+    focused === "to" && toSuggestions.suggestions.length > 0
+  );
+  const ccKb = useContactSuggestionKeyboard(
+    ccSuggestions.suggestions,
+    pickCc,
+    focused === "cc" && ccSuggestions.suggestions.length > 0
+  );
 
-  // Saved contacts power alias resolution: typing a contact's name (or first
-  // name) in To/Cc auto-resolves to their email so it passes validation.
-  const { data: contactsData } = useQuery<{ contacts: { email: string; name: string | null }[] }>({
-    queryKey: ["contacts"],
-    queryFn: () => fetch("/api/contacts").then((r) => r.json()),
-    staleTime: 60_000,
-  });
-
-  const aliasMap = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const c of contactsData?.contacts ?? []) {
-      if (!c.name) continue;
-      const full = c.name.trim().toLowerCase();
-      if (full && !m.has(full)) m.set(full, c.email);
-      const first = full.split(/\s+/)[0];
-      if (first && !m.has(first)) m.set(first, c.email);
-    }
-    return m;
-  }, [contactsData]);
-
-  const resolveAlias = (token: string) =>
-    EMAIL_RE.test(token) ? token : aliasMap.get(token.toLowerCase()) ?? token;
-
-  const rawTo = splitEmails(to);
-  const rawCc = splitEmails(cc);
-  const toList = rawTo.map(resolveAlias);
-  const ccList = rawCc.map(resolveAlias);
-  const resolvedAlias = [...rawTo, ...rawCc].some((t) => !EMAIL_RE.test(t) && EMAIL_RE.test(resolveAlias(t)));
-  const badEmails = [...toList, ...ccList].filter((e) => !EMAIL_RE.test(e));
+  const toList = parseRecipientField(to);
+  const ccList = parseRecipientField(cc);
+  const unresolved = hasUnresolvedRecipients(to) || hasUnresolvedRecipients(cc);
   const canSend =
-    (toList.length > 0 || !!draft.threadId) && !!body.trim() && badEmails.length === 0;
+    (toList.length > 0 || !!draft.threadId) && !!body.trim() && !unresolved;
 
   // Debounced autosave to /api/drafts; keeps the draft id for subsequent updates.
   useEffect(() => {
@@ -197,7 +153,10 @@ export function ComposeModal({
               onChange={(e) => setTo(e.target.value)}
               onFocus={() => setFocused("to")}
               onBlur={() => setFocused((f) => (f === "to" ? null : f))}
-              placeholder="To"
+              onKeyDown={(e) => {
+                if (toKb.handleKeyDown(e)) return;
+              }}
+              placeholder="To — type @ for contacts"
               className="border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
             />
             {!showCc && (
@@ -208,10 +167,11 @@ export function ComposeModal({
                 Cc
               </button>
             )}
-            {focused === "to" && (
-              <ContactSuggestions
+            {focused === "to" && toSuggestions.suggestions.length > 0 && (
+              <ContactSuggestionList
                 suggestions={toSuggestions.suggestions}
-                onPick={(email) => setTo(applyContactToken(to, email))}
+                highlightIndex={toKb.highlightIndex}
+                onPick={pickTo}
               />
             )}
           </div>
@@ -222,13 +182,17 @@ export function ComposeModal({
                 onChange={(e) => setCc(e.target.value)}
                 onFocus={() => setFocused("cc")}
                 onBlur={() => setFocused((f) => (f === "cc" ? null : f))}
-                placeholder="Cc"
+                onKeyDown={(e) => {
+                  if (ccKb.handleKeyDown(e)) return;
+                }}
+                placeholder="Cc — type @ for contacts"
                 className="border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
               />
-              {focused === "cc" && (
-                <ContactSuggestions
+              {focused === "cc" && ccSuggestions.suggestions.length > 0 && (
+                <ContactSuggestionList
                   suggestions={ccSuggestions.suggestions}
-                  onPick={(email) => setCc(applyContactToken(cc, email))}
+                  highlightIndex={ccKb.highlightIndex}
+                  onPick={pickCc}
                 />
               )}
             </div>
@@ -252,16 +216,9 @@ export function ComposeModal({
           />
         </div>
 
-        {resolvedAlias && badEmails.length === 0 && (
-          <p className="border-t px-4 py-1.5 text-xs text-muted-foreground">
-            Sending to: {toList.join(", ")}
-            {ccList.length > 0 && ` · cc ${ccList.join(", ")}`}
-          </p>
-        )}
-
-        {badEmails.length > 0 && (
+        {unresolved && (
           <p className="border-t px-4 py-1.5 text-xs text-destructive">
-            Invalid email or unknown contact: {badEmails.join(", ")}
+            Finish contact names with @ or use a full email address.
           </p>
         )}
 

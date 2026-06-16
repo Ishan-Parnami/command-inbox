@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { format } from "date-fns";
 import { Search, X } from "lucide-react";
+import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
@@ -57,13 +58,17 @@ export function SearchOverlay({
   }, [query]);
 
   const select = (h: Hit) => {
-    if (h.threadId && onSelectThread) onSelectThread(h.threadId);
+    if (!h.threadId) {
+      toast.error("This message isn't synced to your inbox yet — try Sync first.");
+      return;
+    }
+    onSelectThread?.(h.threadId);
     onOpenChange(false);
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent showCloseButton={false} className="top-1/4 translate-y-0 overflow-hidden p-0 sm:max-w-xl">
+      <DialogContent showCloseButton className="top-1/4 translate-y-0 overflow-hidden p-0 sm:max-w-xl">
         <DialogHeader className="sr-only">
           <DialogTitle>Search emails</DialogTitle>
           <DialogDescription>Search across your inbox using AI, full-text, and live Gmail</DialogDescription>
@@ -140,7 +145,7 @@ export function SearchOverlay({
               <span className="font-medium">Text</span> — subject/body keyword match ·{" "}
               <span className="font-medium text-green-700 dark:text-green-400">Live</span> — hits Gmail directly if not cached yet.
             </p>
-            <p className="text-muted-foreground/80">Shortcut: ⌘F or /</p>
+            <p className="text-muted-foreground/80">Shortcut: ⌘F</p>
           </div>
         )}
       </DialogContent>

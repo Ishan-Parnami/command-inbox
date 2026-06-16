@@ -429,12 +429,11 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
   useHotkeys("u", toggleRead);
   useHotkeys("h", openSnooze);
   useHotkeys("c", openCompose);
-  useHotkeys("n", () => setNaturalOpen(true));
+  useHotkeys("n", (e) => { e.preventDefault(); setNaturalOpen(true); });
   useHotkeys("shift+3", () => undoableAct("trash"));
   useHotkeys("mod+k", (e) => { e.preventDefault(); setPaletteOpen((o) => !o); }, { enableOnFormTags: true });
   useHotkeys("shift+/", () => setPaletteOpen(true));
   useHotkeys("mod+f", (e) => { e.preventDefault(); setSearchOpen(true); }, { enableOnFormTags: true });
-  useHotkeys("/", (e) => { e.preventDefault(); setSearchOpen(true); });
   useHotkeys("mod+slash", (e) => { e.preventDefault(); setMainView("agent"); }, { enableOnFormTags: true });
 
   const selectedRowRef = useRef<HTMLButtonElement>(null);
@@ -704,7 +703,15 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
   return (
     <div className="relative flex min-h-0 flex-1 overflow-hidden">
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} groups={paletteGroups} />
-      <SearchOverlay open={searchOpen} onOpenChange={setSearchOpen} onSelectThread={(id) => { setSelectedId(id); setMainView("inbox"); }} />
+      <SearchOverlay
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+        onSelectThread={(id) => {
+          setTab("all");
+          setSelectedId(id);
+          setMainView("inbox");
+        }}
+      />
       <ComposeModal key={composeKey} open={composeOpen} draft={composeDraft} onOpenChange={setComposeOpen} onSend={sendWithUndo} />
       <NaturalInputBar open={naturalOpen} onOpenChange={setNaturalOpen} onResult={handleNaturalResult} />
 
@@ -745,7 +752,7 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
         <div className="mt-auto flex flex-col items-center gap-1">
           <NavBtn
             icon={<Search className="size-5" />}
-            title="AI search (⌘F or /)"
+            title="AI search (⌘F)"
             onClick={() => setSearchOpen(true)}
           />
           <NavBtn

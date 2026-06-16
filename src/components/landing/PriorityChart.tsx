@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Bar,
   BarChart,
   Cell,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
@@ -18,19 +17,26 @@ const DATA = [
   { priority: "Low", count: 51, fill: "#64748b" },
 ];
 
-export function PriorityChart() {
-  // Recharts' ResponsiveContainer measures its parent on first paint; during
-  // SSR hydration that can resolve to -1 and emit a console warning. Render the
-  // chart only after mount, when the container has real dimensions.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+const CHART_HEIGHT = 288;
 
-  if (!mounted) return <div className="h-72 w-full" />;
+export function PriorityChart() {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const update = () => setWidth(el.clientWidth);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   return (
-    <div className="h-72 w-full">
-      <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-        <BarChart data={DATA} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+    <div ref={containerRef} className="h-72 w-full min-w-0">
+      {width > 0 && (
+        <BarChart width={width} height={CHART_HEIGHT} data={DATA} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
           <XAxis
             dataKey="priority"
             tickLine={false}
@@ -54,7 +60,7 @@ export function PriorityChart() {
             ))}
           </Bar>
         </BarChart>
-      </ResponsiveContainer>
+      )}
     </div>
   );
 }

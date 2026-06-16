@@ -14,7 +14,16 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { useContactSuggestions, applyContactToken } from "@/hooks/useContactSuggestions";
+import {
+  useContactSuggestions,
+  applyContactMention,
+  parseRecipientField,
+  type Contact,
+} from "@/hooks/useContactSuggestions";
+import {
+  ContactSuggestionList,
+  useContactSuggestionKeyboard,
+} from "@/components/shared/ContactSuggestionList";
 
 export type EventSeed = {
   title?: string;
@@ -68,6 +77,12 @@ export function CreateEventModal({
   const [conflicts, setConflicts] = useState<{ title: string; startTime: string }[]>([]);
   const [attendeesFocused, setAttendeesFocused] = useState(false);
   const attendeeSuggestions = useContactSuggestions(attendees);
+  const pickAttendee = (c: Contact) => setAttendees(applyContactMention(attendees, c, ", "));
+  const attendeeKb = useContactSuggestionKeyboard(
+    attendeeSuggestions.suggestions,
+    pickAttendee,
+    attendeesFocused && attendeeSuggestions.suggestions.length > 0
+  );
 
   const save = async (force = false) => {
     if (!title.trim()) { toast.error("Title is required"); return; }
@@ -80,7 +95,7 @@ export function CreateEventModal({
         location: location.trim() || undefined,
         startTime: new Date(startTime).toISOString(),
         endTime: new Date(endTime).toISOString(),
-        attendees: attendees.split(",").map((e) => e.trim()).filter(Boolean),
+        attendees: parseRecipientField(attendees),
       };
       const res = isEdit
         ? await fetch(`/api/events/${eventId}`, {
@@ -166,26 +181,17 @@ export function CreateEventModal({
               onChange={(e) => setAttendees(e.target.value)}
               onFocus={() => setAttendeesFocused(true)}
               onBlur={() => setAttendeesFocused(false)}
-              placeholder="Attendees — comma-separated emails"
+              onKeyDown={(e) => {
+                if (attendeeKb.handleKeyDown(e)) return;
+              }}
+              placeholder="Attendees — type @ for contacts"
             />
             {attendeesFocused && attendeeSuggestions.suggestions.length > 0 && (
-              <ul className="absolute left-0 right-0 top-full z-50 mt-0.5 max-h-48 overflow-auto rounded-md border bg-popover py-1 shadow-md">
-                {attendeeSuggestions.suggestions.map((c) => (
-                  <li key={c.email}>
-                    <button
-                      type="button"
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        setAttendees(applyContactToken(attendees, c.email));
-                      }}
-                      className="flex w-full flex-col items-start px-3 py-1.5 text-left text-sm hover:bg-accent"
-                    >
-                      <span className="font-medium">{c.name || c.email}</span>
-                      {c.name && <span className="text-xs text-muted-foreground">{c.email}</span>}
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              <ContactSuggestionList
+                suggestions={attendeeSuggestions.suggestions}
+                highlightIndex={attendeeKb.highlightIndex}
+                onPick={pickAttendee}
+              />
             )}
           </div>
 

@@ -9,7 +9,6 @@ import {
   sendMessage,
   archiveMessage,
   getThread,
-  searchCachedMessages,
   listEvents,
   createEvent,
   CorsairAuthError,
@@ -17,6 +16,7 @@ import {
 import { gmailAddress } from "@/lib/email/send";
 import { buildRawMessage } from "@/lib/email/mime";
 import { contactDirectory } from "@/lib/contacts";
+import { searchEmailsForAgent } from "@/lib/search/agent";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
@@ -125,7 +125,7 @@ async function runTool(
   console.log(`[agent:tool] ${name} called`, { userId, args: JSON.stringify(args) });
   switch (name) {
     case "search_emails":
-      return searchCachedMessages(userId, String(args.query), 10);
+      return searchEmailsForAgent(userId, String(args.query), 10);
 
     case "get_email_thread":
       return getThread(userId, String(args.threadId));

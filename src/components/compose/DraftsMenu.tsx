@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { FileText, Clock } from "lucide-react";
+import { FileText, Clock, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -63,14 +64,23 @@ export function DraftsMenu({ onOpenDraft }: { onOpenDraft: (draft: ComposeDraft)
   const scheduled = data?.scheduled ?? [];
   const total = drafts.length + scheduled.length;
 
-  // Editing a scheduled message cancels the queued send, then reopens it as a draft.
-  const openScheduled = async (d: DraftRow) => {
-    await fetch("/api/drafts", {
+  const removeDraft = async (draftId: string) => {
+    const res = await fetch("/api/drafts", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ draftId: d.id }),
+      body: JSON.stringify({ draftId }),
     }).catch(() => null);
+    if (!res?.ok) {
+      toast.error("Failed to delete");
+      return;
+    }
+    toast.success("Deleted");
     queryClient.invalidateQueries({ queryKey: ["drafts"] });
+  };
+
+  // Editing a scheduled message cancels the queued send, then reopens it as a draft.
+  const openScheduled = async (d: DraftRow) => {
+    await removeDraft(d.id);
     onOpenDraft(toCompose(d, false));
   };
 
@@ -89,11 +99,28 @@ export function DraftsMenu({ onOpenDraft }: { onOpenDraft: (draft: ComposeDraft)
 
         {drafts.length > 0 && <SectionLabel>Drafts</SectionLabel>}
         {drafts.map((d) => (
-          <DropdownMenuItem key={d.id} onClick={() => onOpenDraft(toCompose(d, true))} className="flex flex-col items-start gap-0.5">
-            <span className="w-full truncate text-sm">{label(d)}</span>
-            {(d.toEmails?.length ?? 0) > 0 && (
-              <span className="w-full truncate text-xs text-muted-foreground">To: {d.toEmails!.join(", ")}</span>
-            )}
+          <DropdownMenuItem
+            key={d.id}
+            onClick={() => onOpenDraft(toCompose(d, true))}
+            className="flex items-center gap-2"
+          >
+            <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+              <span className="w-full truncate text-sm">{label(d)}</span>
+              {(d.toEmails?.length ?? 0) > 0 && (
+                <span className="w-full truncate text-xs text-muted-foreground">To: {d.toEmails!.join(", ")}</span>
+              )}
+            </div>
+            <button
+              type="button"
+              title="Delete draft"
+              onClick={(e) => {
+                e.stopPropagation();
+                void removeDraft(d.id);
+              }}
+              className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+            >
+              <Trash2 className="size-3.5" />
+            </button>
           </DropdownMenuItem>
         ))}
 
@@ -102,12 +129,29 @@ export function DraftsMenu({ onOpenDraft }: { onOpenDraft: (draft: ComposeDraft)
             {drafts.length > 0 && <div className="my-1 h-px bg-border" />}
             <SectionLabel>Scheduled</SectionLabel>
             {scheduled.map((d) => (
-              <DropdownMenuItem key={d.id} onClick={() => openScheduled(d)} className="flex flex-col items-start gap-0.5">
-                <span className="w-full truncate text-sm">{label(d)}</span>
-                <span className="flex items-center gap-1 text-xs text-primary">
-                  <Clock className="size-3" />
-                  {d.scheduledAt ? format(new Date(d.scheduledAt), "MMM d, h:mm a") : "scheduled"}
-                </span>
+              <DropdownMenuItem
+                key={d.id}
+                onClick={() => openScheduled(d)}
+                className="flex items-center gap-2"
+              >
+                <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                  <span className="w-full truncate text-sm">{label(d)}</span>
+                  <span className="flex items-center gap-1 text-xs text-primary">
+                    <Clock className="size-3" />
+                    {d.scheduledAt ? format(new Date(d.scheduledAt), "MMM d, h:mm a") : "scheduled"}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  title="Cancel scheduled send"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void removeDraft(d.id);
+                  }}
+                  className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
               </DropdownMenuItem>
             ))}
           </>

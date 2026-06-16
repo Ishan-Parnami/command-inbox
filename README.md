@@ -9,7 +9,7 @@ A Superhuman-style Gmail & Google Calendar command center. Built with **Next.js*
 - **AI Priority Inbox** — Gemini classifies emails (Urgent → Normal → Low)
 - **Keyboard-first UI** — Full Vim keybindings (j/k, e for archive, c for compose, n for natural compose)
 - **Natural Compose** — Press `N`, type "Lunch with Sara tomorrow 1pm" or "Email John about the sprint" → pre-filled event or compose
-- **Command Palette** — ⌘K for instant actions
+- **Command Palette** — ⌘K for instant actions; ⌘F for AI search; ⌘/ for AI assistant
 - **Action Board** — Auto-extracted to-dos from emails
 - **Contacts** — Full CRUD (add, rename, delete, VIP) with global alias resolution: saved names auto-resolve to emails in Mail, Calendar, and the AI assistant
 
@@ -49,21 +49,24 @@ pnpm install
 ```
 
 2. **Environment variables:**
-Copy `.env.example` to `.env.local` and fill in:
+Copy `.env.example` to `.env.local` and fill in (see file for full list):
 ```bash
 NEXT_PUBLIC_URL=http://localhost:3000
+NEXTAUTH_URL=http://localhost:3000
+NEXTAUTH_SECRET=<openssl rand -base64 32>
+AUTH_GOOGLE_ID=<google-oauth-client-id>
+AUTH_GOOGLE_SECRET=<google-oauth-client-secret>
 DATABASE_URL=postgresql://...
 CORSAIR_DEV_KEY=<your-dev-key>
 CORSAIR_INSTANCE_ID=<your-instance-id>
 GEMINI_API_KEY=<your-api-key>
-UPSTASH_REDIS_REST_URL=<your-upstash-url>
-UPSTASH_REDIS_REST_TOKEN=<your-upstash-token>
 ```
 
 3. **Setup database:**
 ```bash
-pnpm drizzle-kit push
+pnpm db:init
 ```
+(Applies schema + pgvector HNSW/FTS indexes. Alternative: `pnpm drizzle-kit push` then run `drizzle/hnsw.sql` manually.)
 
 4. **Run dev server:**
 ```bash
@@ -82,13 +85,13 @@ Open [http://localhost:3000](http://localhost:3000)
 
 ## 🎯 Bonus Features Implemented
 
-- [ ] Vector embeddings + semantic search (pgvector + Gemini)
-- [ ] Pre-meeting AI brief
-- [ ] MCP agent multi-step actions
-- [ ] Keyboard shortcut customization
-- [ ] Email snoozed reminder system
-- [ ] Send later scheduling
-- [ ] Contact intelligence
+- [x] Vector embeddings + semantic search (pgvector + Gemini)
+- [x] Pre-meeting AI brief
+- [x] MCP agent multi-step actions
+- [ ] Keyboard shortcut customization (schema ready, UI not wired)
+- [x] Email snoozed reminder system
+- [x] Send later scheduling
+- [x] Contact intelligence
 
 ## 📚 Detailed Planning
 

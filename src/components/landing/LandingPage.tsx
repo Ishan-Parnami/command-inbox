@@ -10,7 +10,7 @@ import { ThemeToggle } from "@/components/shared/ThemeToggle";
 const FEATURES = [
   { icon: Inbox, title: "Priority Inbox", desc: "Every email is classified urgent → low so the important things rise to the top automatically." },
   { icon: Bot, title: "MCP Agent", desc: "An assistant with six real tools that can triage, search, draft, and schedule on your behalf." },
-  { icon: Search, title: "Tri-mode AI Search", desc: "Find any email instantly — semantic AI understands meaning, full-text matches keywords, and live Gmail catches the rest. Press ⌘F or /." },
+  { icon: Search, title: "Tri-mode AI Search", desc: "Find any email instantly — semantic AI understands meaning, full-text matches keywords, and live Gmail catches the rest. Press ⌘F." },
   { icon: CalendarClock, title: "Pre-meeting Brief", desc: "Walk into every meeting prepared with an AI brief built from related threads." },
   { icon: CheckSquare, title: "Action Board", desc: "To-dos extracted from your urgent and high-priority mail, ready to check off." },
   { icon: Keyboard, title: "Keyboard-first", desc: "Triage at the speed of thought with j/k navigation, single-key actions, and a command palette." },
@@ -19,7 +19,7 @@ const FEATURES = [
 const STEPS = [
   { n: "1", title: "Connect", desc: "Securely link Gmail and Google Calendar in one OAuth click." },
   { n: "2", title: "Sync & classify", desc: "Your inbox is mirrored and every message is prioritized by AI." },
-  { n: "3", title: "Act", desc: "Triage, reply, schedule, and stay at inbox zero — all from the keyboard." },
+  { n: "3", title: "Act", desc: "Triage, reply, schedule, and stay at Command Inbox — all from the keyboard." },
 ];
 
 const SHORTCUT_GROUPS: { group: string; items: { keys: string[]; label: string }[] }[] = [
@@ -29,7 +29,6 @@ const SHORTCUT_GROUPS: { group: string; items: { keys: string[]; label: string }
       { keys: ["J"], label: "Next email" },
       { keys: ["K"], label: "Previous email" },
       { keys: ["⌘", "F"], label: "AI search emails" },
-      { keys: ["/"], label: "AI search emails" },
       { keys: ["⌘", "K"], label: "Command palette" },
       { keys: ["?"], label: "Show all commands" },
     ],
@@ -82,7 +81,7 @@ export function LandingPage() {
       {/* Hero */}
       <section className="mx-auto max-w-5xl px-6 pt-16 pb-20 text-center md:pt-24">
         <h1 className="text-4xl font-bold tracking-tight md:text-6xl">
-          Inbox Zero. <span className="text-primary">In seconds.</span>
+        Command Inbox. <span className="text-primary">In seconds.</span>
         </h1>
         <p className="mx-auto mt-5 max-w-xl text-base text-muted-foreground md:text-lg">
           A keyboard-first, AI-native command center for your email and calendar. Triage faster,
@@ -112,7 +111,7 @@ export function LandingPage() {
               { tag: "Normal", color: "bg-indigo-500", from: "GitHub", subj: "3 pull requests awaiting your review" },
               { tag: "Low", color: "bg-slate-400", from: "Newsletter", subj: "This week in design systems" },
             ].map((r) => (
-              <div key={r.subj} className="flex items-center gap-3 px-4 py-3 text-sm">
+              <div key={r.subj} className="flex items-center gap-3 px-4 py-3 text-sm hover:bg-muted cursor-pointer transition-all duration-200">
                 <span className={cn("inline-block size-2 shrink-0 rounded-full", r.color)} />
                 <span className="w-28 shrink-0 truncate font-medium">{r.from}</span>
                 <span className="truncate text-muted-foreground">{r.subj}</span>
@@ -133,7 +132,7 @@ export function LandingPage() {
           </h2>
           <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {FEATURES.map((f) => (
-              <div key={f.title} className="rounded-xl border bg-card p-6">
+              <div key={f.title} className="rounded-xl border bg-card p-6 hover:bg-muted cursor-pointer hover:shadow-sm transition-all duration-200">
                 <f.icon className="size-6 text-primary" />
                 <h3 className="mt-4 font-medium">{f.title}</h3>
                 <p className="mt-1.5 text-sm text-muted-foreground">{f.desc}</p>
@@ -147,19 +146,19 @@ export function LandingPage() {
       <section className="px-6 py-20 md:px-10">
         <div className="mx-auto grid max-w-5xl items-center gap-12 md:grid-cols-2">
           <div className="grid grid-cols-3 gap-6 text-center">
-            <div>
+            <div className="hover:scale-105 transition-all duration-300 hover:bg-muted rounded-full aspect-square flex flex-col items-center justify-center">
               <div className="text-3xl font-bold text-primary md:text-4xl">
                 <AnimatedCounter value={184} />
               </div>
               <div className="mt-1 text-xs text-muted-foreground">emails triaged daily</div>
             </div>
-            <div>
+            <div className="hover:scale-105 transition-all duration-300 hover:bg-muted rounded-full aspect-square flex flex-col items-center justify-center">
               <div className="text-3xl font-bold text-primary md:text-4xl">
                 <AnimatedCounter value={92} suffix="%" />
               </div>
               <div className="mt-1 text-xs text-muted-foreground">classified correctly</div>
             </div>
-            <div>
+            <div className="hover:scale-105 transition-all duration-300 hover:bg-muted rounded-full aspect-square flex flex-col items-center justify-center">
               <div className="text-3xl font-bold text-primary md:text-4xl">
                 <AnimatedCounter value={3} suffix="h" />
               </div>
@@ -205,9 +204,9 @@ export function LandingPage() {
             {SHORTCUT_GROUPS.map((g) => (
               <div key={g.group} className="rounded-xl border bg-card p-6">
                 <h3 className="mb-4 text-sm font-semibold text-primary">{g.group}</h3>
-                <ul className="space-y-3">
+                <ul>
                   {g.items.map((s) => (
-                    <li key={s.label} className="flex items-center justify-between gap-3">
+                    <li key={s.label} className="flex items-center justify-between gap-3 hover:bg-muted rounded-md p-2 transition-all duration-200">
                       <span className="text-sm text-muted-foreground">{s.label}</span>
                       <span className="flex shrink-0 items-center gap-1">
                         {s.keys.map((k) => (

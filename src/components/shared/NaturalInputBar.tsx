@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Sparkles, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -12,6 +12,14 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import {
+  useContactSuggestions,
+  applyContactMention,
+} from "@/hooks/useContactSuggestions";
+import {
+  ContactSuggestionList,
+  useContactSuggestionKeyboard,
+} from "@/components/shared/ContactSuggestionList";
 
 export type ParseResult = {
   intent: "email" | "event";
@@ -36,6 +44,20 @@ export function NaturalInputBar({
 }) {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
+  const [focused, setFocused] = useState(false);
+
+  const contactSuggestions = useContactSuggestions(text);
+  const pickContact = (contact: { email: string; name: string | null }) =>
+    setText(applyContactMention(text, contact));
+  const contactKb = useContactSuggestionKeyboard(
+    contactSuggestions.suggestions,
+    pickContact,
+    focused && contactSuggestions.suggestions.length > 0
+  );
+
+  useEffect(() => {
+    if (open) setText("");
+  }, [open]);
 
   const submit = async () => {
     const trimmed = text.trim();
@@ -76,16 +98,27 @@ export function NaturalInputBar({
             Natural compose
           </DialogTitle>
           <DialogDescription>
-            Describe an email or event in plain English. e.g. &ldquo;Email Sara about the launch&rdquo; or
-            &ldquo;Lunch with John tomorrow 1pm&rdquo;.
+            Describe an email or event in plain English. Type <kbd className="rounded border px-1">@</kbd> for
+            contacts. e.g. &ldquo;Email @Sara about the launch&rdquo; or &ldquo;Lunch with @John tomorrow 1pm&rdquo;.
           </DialogDescription>
         </DialogHeader>
-        <div className="flex items-center gap-2">
+        <div className="relative flex items-center gap-2">
+          {focused && contactSuggestions.suggestions.length > 0 && (
+            <ContactSuggestionList
+              suggestions={contactSuggestions.suggestions}
+              highlightIndex={contactKb.highlightIndex}
+              onPick={pickContact}
+              position="above"
+            />
+          )}
           <Input
             autoFocus
             value={text}
             onChange={(e) => setText(e.target.value)}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
             onKeyDown={(e) => {
+              if (contactKb.handleKeyDown(e)) return;
               if (e.key === "Enter") {
                 e.preventDefault();
                 void submit();

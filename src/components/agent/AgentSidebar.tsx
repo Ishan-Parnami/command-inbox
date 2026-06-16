@@ -23,51 +23,33 @@ import {
 import { useAgentStore, type AgentMessage } from "@/store/agent.store";
 import {
   useContactSuggestions,
-  applyAgentContactToken,
-  type Contact,
+  applyContactMention,
 } from "@/hooks/useContactSuggestions";
+import {
+  ContactSuggestionList,
+  useContactSuggestionKeyboard,
+} from "@/components/shared/ContactSuggestionList";
 
 type ConversationSummary = { id: string; title: string; count: number; updatedAt: string };
-
-function AgentContactSuggestions({
-  suggestions,
-  onPick,
-}: {
-  suggestions: Contact[];
-  onPick: (contact: Contact) => void;
-}) {
-  if (suggestions.length === 0) return null;
-  return (
-    <ul className="absolute bottom-full left-0 right-0 z-50 mb-1 max-h-40 overflow-auto rounded-md border bg-popover py-1 shadow-md">
-      {suggestions.map((c) => (
-        <li key={c.email}>
-          <button
-            type="button"
-            onMouseDown={(e) => {
-              e.preventDefault();
-              onPick(c);
-            }}
-            className="flex w-full flex-col items-start px-3 py-1.5 text-left text-sm hover:bg-accent"
-          >
-            <span className="font-medium">{c.name || c.email}</span>
-            {c.name && <span className="text-xs text-muted-foreground">{c.email}</span>}
-          </button>
-        </li>
-      ))}
-    </ul>
-  );
-}
 
 export function AgentSidebar() {
   const { isStreaming, messages, conversationId, setStreaming, addMessage, updateLastMessage, appendToolCall, resolveToolCall, setConversationId, loadConversation, reset } = useAgentStore();
   const [input, setInput] = useState("");
   const [inputFocused, setInputFocused] = useState(false);
-  const contactSuggestions = useContactSuggestions(input, "@");
+  const contactSuggestions = useContactSuggestions(input);
+  const pickContact = (contact: { email: string; name: string | null }) =>
+    setInput(applyContactMention(input, contact));
+  const contactKb = useContactSuggestionKeyboard(
+    contactSuggestions.suggestions,
+    pickContact,
+    inputFocused && contactSuggestions.suggestions.length > 0
+  );
   const [history, setHistory] = useState<ConversationSummary[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ConversationSummary | null>(null);
   const [deleting, setDeleting] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const loadHistory = async () => {
@@ -299,7 +281,10 @@ export function AgentSidebar() {
               ].map((s) => (
                 <button
                   key={s}
-                  onClick={() => { setInput(s); }}
+                  onClick={() => {
+                    setInput(s);
+                    setTimeout(() => inputRef.current?.focus(), 0);
+                  }}
                   className="w-full text-center rounded-md border px-3 py-1.5 text-xs hover:bg-muted transition-colors"
                 >
                   {s}
@@ -351,17 +336,21 @@ export function AgentSidebar() {
       <div className="shrink-0 border-t p-3">
         <div className="relative flex items-end gap-2">
           {inputFocused && contactSuggestions.suggestions.length > 0 && (
-            <AgentContactSuggestions
+            <ContactSuggestionList
               suggestions={contactSuggestions.suggestions}
-              onPick={(c) => setInput(applyAgentContactToken(input, c))}
+              highlightIndex={contactKb.highlightIndex}
+              onPick={pickContact}
+              position="above"
             />
           )}
           <Textarea
+            ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onFocus={() => setInputFocused(true)}
             onBlur={() => setInputFocused(false)}
             onKeyDown={(e) => {
+              if (contactKb.handleKeyDown(e)) return;
               if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
             }}
             placeholder="Ask anything… type @ for contacts (↵ send, ⇧↵ newline)"
