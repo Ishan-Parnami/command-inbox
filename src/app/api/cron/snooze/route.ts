@@ -6,10 +6,10 @@ import { broadcastToUser } from "@/lib/sse";
 
 // Called by Vercel Cron every minute to wake snoozed threads.
 export async function GET(req: Request) {
-  const secret = req.headers.get("authorization");
-  if (secret !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  const authorized =
+    req.headers.get("x-vercel-cron") !== null ||
+    req.headers.get("authorization") === `Bearer ${process.env.CRON_SECRET}`;
+  if (!authorized) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const now = new Date();
 

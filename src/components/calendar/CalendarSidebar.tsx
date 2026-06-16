@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, isToday, isTomorrow } from "date-fns";
 import { Calendar, Plus, ExternalLink, Users, X, Trash2 } from "lucide-react";
@@ -67,6 +67,17 @@ export function CalendarSidebar({ initialSeed, onClose }: { initialSeed?: EventS
   const [expanded, setExpanded] = useState<string | null>(null);
   const [briefEvent, setBriefEvent] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  const syncedRef = useRef(false);
+
+  useEffect(() => {
+    if (syncedRef.current) return;
+    syncedRef.current = true;
+    fetch("/api/calendar/sync", { method: "POST" })
+      .then(async (r) => {
+        if (r.ok) await queryClient.invalidateQueries({ queryKey: ["events"] });
+      })
+      .catch(() => {});
+  }, [queryClient]);
 
   const { data, isLoading } = useQuery({
     queryKey: ["events"],

@@ -9,6 +9,8 @@ import {
   CorsairAuthError,
   type Provider,
 } from "@/lib/corsair/client";
+import { syncGmail } from "@/lib/sync/gmail";
+import { syncCalendar } from "@/lib/sync/calendar";
 
 async function recordConnection(userId: string, provider: Provider, email?: string | null) {
   await db
@@ -59,5 +61,14 @@ export async function GET(req: Request) {
   }
 
   await recordConnection(userId, provider, session.user.email);
+
+  // Backfill the local mirror immediately so data is visible without manual Sync.
+  try {
+    if (provider === "gmail") await syncGmail(userId, 30);
+    else await syncCalendar(userId, session.user.email);
+  } catch (e) {
+    console.error(`[corsair] ${provider} initial sync failed:`, e);
+  }
+
   return NextResponse.redirect(new URL(`/?connected=${provider}`, req.url));
 }

@@ -21,16 +21,17 @@ export async function POST() {
     .where(eq(corsairConnections.userId, userId));
 
   const result: { emails?: number; events?: number; classified?: number } = {};
+  const gmail = conns.some((c) => c.provider === "gmail");
+  const cal = conns.find((c) => c.provider === "googlecalendar");
   try {
-    if (conns.some((c) => c.provider === "gmail")) {
-      const r = await syncGmail(userId);
-      result.emails = r.processed;
-      result.classified = await classifyUnclassified(userId);
-    }
-    if (conns.some((c) => c.provider === "googlecalendar")) {
-      const cal = conns.find((c) => c.provider === "googlecalendar");
-      result.events = await syncCalendar(userId, cal?.connectedEmail);
-    }
+    const [gmailResult, eventCount] = await Promise.all([
+      gmail ? syncGmail(userId) : Promise.resolve(null),
+      cal ? syncCalendar(userId, cal.connectedEmail) : Promise.resolve(null),
+    ]);
+    if (gmailResult) result.emails = gmailResult.processed;
+    if (eventCount !== null) result.events = eventCount;
+    // Classification is the slowest step — run after mail is mirrored, don't block calendar.
+    if (gmail) result.classified = await classifyUnclassified(userId);
   } catch (e) {
     if (e instanceof CorsairAuthError) {
       return NextResponse.json({ error: "reconnect", signInLink: e.signInLink }, { status: 409 });
