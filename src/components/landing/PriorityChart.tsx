@@ -47,11 +47,16 @@ export function PriorityChart() {
           <YAxis tickLine={false} axisLine={false} className="text-xs" stroke="currentColor" width={28} />
           <Tooltip
             cursor={{ fill: "currentColor", opacity: 0.06 }}
-            contentStyle={{
-              background: "var(--popover)",
-              border: "1px solid var(--border)",
-              borderRadius: 8,
-              fontSize: 12,
+            content={({ active, payload }) => {
+              if (active && payload && payload.length) {
+                return (
+                  <div className="bg-popover border border-border rounded-lg p-2">
+                    <p className="text-sm font-medium">{payload[0].name}</p>
+                    <p className="text-sm text-muted-foreground">{payload[0].value}</p>
+                  </div>
+                );
+              }
+              return null;
             }}
           />
           <Bar dataKey="count" radius={[6, 6, 0, 0]}>

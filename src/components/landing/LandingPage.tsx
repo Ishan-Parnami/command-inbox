@@ -111,7 +111,7 @@ export function LandingPage() {
               { tag: "Normal", color: "bg-indigo-500", from: "GitHub", subj: "3 pull requests awaiting your review" },
               { tag: "Low", color: "bg-slate-400", from: "Newsletter", subj: "This week in design systems" },
             ].map((r) => (
-              <div key={r.subj} className="flex items-center gap-3 px-4 py-3 text-sm hover:bg-muted cursor-pointer transition-all duration-200">
+              <div key={r.subj} className="flex items-center gap-3 px-4 py-3 text-sm hover:bg-muted/60 cursor-pointer transition-all duration-200">
                 <span className={cn("inline-block size-2 shrink-0 rounded-full", r.color)} />
                 <span className="w-28 shrink-0 truncate font-medium">{r.from}</span>
                 <span className="truncate text-muted-foreground">{r.subj}</span>
@@ -132,7 +132,7 @@ export function LandingPage() {
           </h2>
           <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {FEATURES.map((f) => (
-              <div key={f.title} className="rounded-xl border bg-card p-6 hover:bg-muted cursor-pointer hover:shadow-sm transition-all duration-200">
+              <div key={f.title} className="rounded-xl border bg-card p-6 hover:bg-muted/60 cursor-default hover:shadow-sm transition-all duration-200">
                 <f.icon className="size-6 text-primary" />
                 <h3 className="mt-4 font-medium">{f.title}</h3>
                 <p className="mt-1.5 text-sm text-muted-foreground">{f.desc}</p>
@@ -146,19 +146,19 @@ export function LandingPage() {
       <section className="px-6 py-20 md:px-10">
         <div className="mx-auto grid max-w-5xl items-center gap-12 md:grid-cols-2">
           <div className="grid grid-cols-3 gap-6 text-center">
-            <div className="hover:scale-105 transition-all duration-300 hover:bg-muted rounded-full aspect-square flex flex-col items-center justify-center">
+            <div className="hover:scale-105 transition-all duration-300 cursor-default hover:bg-muted/60 rounded-full aspect-square flex flex-col items-center justify-center">
               <div className="text-3xl font-bold text-primary md:text-4xl">
                 <AnimatedCounter value={184} />
               </div>
               <div className="mt-1 text-xs text-muted-foreground">emails triaged daily</div>
             </div>
-            <div className="hover:scale-105 transition-all duration-300 hover:bg-muted rounded-full aspect-square flex flex-col items-center justify-center">
+            <div className="hover:scale-105 transition-all duration-300 cursor-default hover:bg-muted/60 rounded-full aspect-square flex flex-col items-center justify-center">
               <div className="text-3xl font-bold text-primary md:text-4xl">
                 <AnimatedCounter value={92} suffix="%" />
               </div>
               <div className="mt-1 text-xs text-muted-foreground">classified correctly</div>
             </div>
-            <div className="hover:scale-105 transition-all duration-300 hover:bg-muted rounded-full aspect-square flex flex-col items-center justify-center">
+            <div className="hover:scale-105 transition-all duration-300 cursor-default hover:bg-muted/60 rounded-full aspect-square flex flex-col items-center justify-center">
               <div className="text-3xl font-bold text-primary md:text-4xl">
                 <AnimatedCounter value={3} suffix="h" />
               </div>
@@ -206,7 +206,7 @@ export function LandingPage() {
                 <h3 className="mb-4 text-sm font-semibold text-primary">{g.group}</h3>
                 <ul>
                   {g.items.map((s) => (
-                    <li key={s.label} className="flex items-center justify-between gap-3 hover:bg-muted rounded-md p-2 transition-all duration-200">
+                    <li key={s.label} className="flex items-center justify-between gap-3 hover:bg-muted/60 cursor-alias rounded-md p-2 transition-all duration-200">
                       <span className="text-sm text-muted-foreground">{s.label}</span>
                       <span className="flex shrink-0 items-center gap-1">
                         {s.keys.map((k) => (
