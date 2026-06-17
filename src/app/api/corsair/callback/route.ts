@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { corsairConnections, users } from "@/lib/db/schema";
 import { completeOAuth, type Provider } from "@/lib/corsair/client";
@@ -53,6 +53,23 @@ export async function GET(req: Request) {
     else await syncCalendar(userId, email);
   } catch (e) {
     console.error(`[corsair] ${provider} initial sync failed:`, e);
+  }
+
+  // One "Connect Google" action: after Gmail, chain straight into the Calendar
+  // consent if it isn't connected yet (each provider is a separate OAuth flow).
+  if (provider === "gmail") {
+    const [cal] = await db
+      .select({ userId: corsairConnections.userId })
+      .from(corsairConnections)
+      .where(
+        and(
+          eq(corsairConnections.userId, userId),
+          eq(corsairConnections.provider, "googlecalendar")
+        )
+      );
+    if (!cal) {
+      return NextResponse.redirect(new URL("/api/corsair/connect?provider=googlecalendar", req.url));
+    }
   }
 
   return NextResponse.redirect(new URL(`/?connected=${provider}`, req.url));

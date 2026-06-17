@@ -39,12 +39,22 @@ function signInLinkFor(provider: Provider): string {
 }
 
 /** Build the Google OAuth authorize URL for this user + provider. */
-export async function getAuthUrl(userId: string, provider: Provider): Promise<string> {
+export async function getAuthUrl(
+  userId: string,
+  provider: Provider,
+  loginHint?: string
+): Promise<string> {
   const { url } = await generateOAuthUrl(corsair, provider, {
     tenantId: userId,
     redirectUri: getRedirectUri(),
   });
-  return url;
+  // Corsair OAuth is separate from NextAuth — Google may reuse whatever account
+  // is signed into the browser. Force the account picker and nudge the email
+  // the user logged in with.
+  const auth = new URL(url);
+  auth.searchParams.set("prompt", "select_account");
+  if (loginHint) auth.searchParams.set("login_hint", loginHint);
+  return auth.toString();
 }
 
 /** Exchange the OAuth `code`/`state` for tokens and store them for the tenant. */

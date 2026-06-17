@@ -13,6 +13,6 @@ export async function GET(req: Request) {
     return NextResponse.redirect(new URL("/", req.url));
   }
 
-  const url = await getAuthUrl(session.user.id, provider);
+  const url = await getAuthUrl(session.user.id, provider, session.user.email ?? undefined);
   return NextResponse.redirect(url);
 }
