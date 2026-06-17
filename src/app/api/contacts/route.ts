@@ -1,20 +1,29 @@
 import { NextResponse } from "next/server";
-import { and, desc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { contacts } from "@/lib/db/schema";
+import { contactEmailCounts } from "@/lib/contacts";
 
 export async function GET() {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   try {
-    const rows = await db
-      .select()
-      .from(contacts)
-      .where(eq(contacts.userId, session.user.id))
-      .orderBy(desc(contacts.emailCount));
-    return NextResponse.json({ contacts: rows });
+    const userId = session.user.id;
+    const [rows, counts] = await Promise.all([
+      db.select().from(contacts).where(eq(contacts.userId, userId)),
+      contactEmailCounts(userId),
+    ]);
+
+    const contactsWithCounts = rows
+      .map((c) => ({
+        ...c,
+        emailCount: counts.get(c.email.toLowerCase()) ?? 0,
+      }))
+      .sort((a, b) => b.emailCount - a.emailCount);
+
+    return NextResponse.json({ contacts: contactsWithCounts });
   } catch {
     return NextResponse.json({ contacts: [] });
   }

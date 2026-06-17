@@ -157,7 +157,13 @@ export async function upsertGmailMessage(
   }
   if (!threadId) throw new Error("failed to upsert thread");
 
-  const inserted = await db
+  const [existingEmail] = await db
+    .select({ id: emails.id })
+    .from(emails)
+    .where(eq(emails.gmailMessageId, msg.id))
+    .limit(1);
+
+  await db
     .insert(emails)
     .values({
       threadId,
@@ -187,14 +193,13 @@ export async function upsertGmailMessage(
         fromName: from.name,
         receivedAt,
       },
-    })
-    .returning({ id: emails.id });
+    });
 
-  if (inserted.length && from.email) {
+  if (!existingEmail && from.email) {
     upsertContacts(userId, [{ email: from.email, name: from.name ?? null, receivedAt }]).catch(() => {});
   }
 
-  return { threadId, created: inserted.length > 0 };
+  return { threadId, created: !existingEmail };
 }
 
 /** Upsert from a Corsair DB search/get row (flat or Gmail API shape). */

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { format } from "date-fns";
-import { Search, X, Mail, Loader2 } from "lucide-react";
+import { Search, Mail, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
@@ -154,11 +154,6 @@ export function SearchOverlay({
             placeholder="Search emails…"
             className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
           />
-          {query && (
-            <button onClick={() => { setQuery(""); setHits([]); }}>
-              <X className="size-4 text-muted-foreground hover:text-foreground" />
-            </button>
-          )}
         </div>
 
         <div className="px-3 pt-2">

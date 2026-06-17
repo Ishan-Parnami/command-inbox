@@ -27,7 +27,6 @@ export async function upsertContacts(userId: string, senders: EmailSender[]) {
       .onConflictDoUpdate({
         target: [contacts.userId, contacts.email],
         set: {
-          emailCount: sql`${contacts.emailCount} + 1`,
           lastEmailedAt: sql`GREATEST(${contacts.lastEmailedAt}, ${s.receivedAt?.toISOString() ?? null})`,
           name: sql`COALESCE(EXCLUDED.name, ${contacts.name})`,
         },

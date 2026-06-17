@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { Type, type Schema } from "@google/genai";
 import { db } from "@/lib/db";
 import { emails, llmClassifications, actionItems } from "@/lib/db/schema";
@@ -47,9 +47,8 @@ If no clear action items, return {"items":[]}.`;
   return result?.items ?? [];
 }
 
-/** Run action-item extraction on urgent+high emails that don't have items yet. */
-export async function extractActionItems(userId: string): Promise<void> {
-  // Get urgent/high email ids for this user (join through emails for userId).
+/** Run action-item extraction on urgent+high emails not yet processed for actions. */
+export async function extractActionItems(userId: string): Promise<number> {
   const highPriority = await db
     .select({ emailId: llmClassifications.emailId })
     .from(llmClassifications)
@@ -57,49 +56,61 @@ export async function extractActionItems(userId: string): Promise<void> {
     .where(
       and(
         eq(emails.userId, userId),
-        inArray(llmClassifications.priority, ["urgent", "high"])
+        inArray(llmClassifications.priority, ["urgent", "high"]),
+        isNull(llmClassifications.actionsExtractedAt)
       )
     );
 
-  if (!highPriority.length) return;
+  if (!highPriority.length) {
+    broadcastToUser(userId, { type: "action_items.extract_done", inserted: 0 });
+    return 0;
+  }
+
   const emailIds = highPriority.map((r) => r.emailId!).filter(Boolean);
 
-  // Filter to those without extracted items yet.
-  const existing = await db
-    .select({ emailId: actionItems.emailId })
-    .from(actionItems)
-    .where(and(eq(actionItems.userId, userId), inArray(actionItems.emailId, emailIds)));
-  const existingIds = new Set(existing.map((r) => r.emailId));
-  const toProcess = emailIds.filter((id) => !existingIds.has(id));
-
-  if (!toProcess.length) return;
-
   const emailRows = await db
-    .select({ id: emails.id, threadId: emails.threadId, subject: emails.subject, bodyText: emails.bodyText, bodySnippet: emails.bodySnippet })
+    .select({
+      id: emails.id,
+      threadId: emails.threadId,
+      subject: emails.subject,
+      bodyText: emails.bodyText,
+      bodySnippet: emails.bodySnippet,
+    })
     .from(emails)
-    .where(and(eq(emails.userId, userId), inArray(emails.id, toProcess)));
+    .where(and(eq(emails.userId, userId), inArray(emails.id, emailIds)));
 
   let inserted = 0;
   for (const email of emailRows) {
     try {
       const items = await extractFromEmail(email);
+
+      // Mark email as processed even when Gemini finds no items — prevents re-running
+      // on the same email after the user deletes extracted tasks.
+      await db
+        .update(llmClassifications)
+        .set({ actionsExtractedAt: new Date() })
+        .where(eq(llmClassifications.emailId, email.id));
+
       if (!items.length) continue;
+
       await db.insert(actionItems).values(
         items.map((item) => ({
           userId,
           emailId: email.id,
           threadId: email.threadId,
-          description: item.description,
+          description: item.description.trim(),
           dueDate: item.dueDate ? new Date(item.dueDate) : undefined,
         }))
       );
       inserted += items.length;
     } catch {
-      // Non-fatal; skip this email
+      // LLM failure — leave actionsExtractedAt null so the next extract can retry.
     }
   }
 
   if (inserted > 0) {
     broadcastToUser(userId, { type: "action_items.updated" });
   }
+  broadcastToUser(userId, { type: "action_items.extract_done", inserted });
+  return inserted;
 }

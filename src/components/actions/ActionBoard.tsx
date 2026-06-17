@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { CheckCircle2, Circle, Loader2, Sparkles, X, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { CheckCircle2, Circle, Loader2, Sparkles, X, Trash2, Plus } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -24,15 +25,48 @@ type ActionItem = {
   createdAt: string;
 };
 
+const EXTRACT_KEY = "action-extract-pending";
+const EXTRACT_TTL_MS = 120_000;
+
+function isExtractPending(): boolean {
+  if (typeof window === "undefined") return false;
+  const t = sessionStorage.getItem(EXTRACT_KEY);
+  if (!t) return false;
+  if (Date.now() - Number(t) > EXTRACT_TTL_MS) {
+    sessionStorage.removeItem(EXTRACT_KEY);
+    return false;
+  }
+  return true;
+}
+
 export function ActionBoard({ onClose }: { onClose?: () => void }) {
-  const [extracting, setExtracting] = useState(false);
+  const [extracting, setExtracting] = useState(isExtractPending);
+  const [addOpen, setAddOpen] = useState(false);
+  const [newDescription, setNewDescription] = useState("");
   const qc = useQueryClient();
 
   const { data, isLoading } = useQuery<{ items: ActionItem[] }>({
     queryKey: ["action-items"],
     queryFn: () => fetch("/api/action-items").then((r) => r.json()),
     staleTime: 30_000,
+    refetchInterval: extracting ? 4_000 : false,
+    refetchOnWindowFocus: true,
   });
+
+  // Stop extracting when background job completes (SSE) or times out.
+  useEffect(() => {
+    if (!extracting) return;
+    const onDone = () => {
+      setExtracting(false);
+      sessionStorage.removeItem(EXTRACT_KEY);
+    };
+    window.addEventListener("action-items-extract-done", onDone);
+    const stop = setTimeout(onDone, EXTRACT_TTL_MS);
+    return () => {
+      window.removeEventListener("action-items-extract-done", onDone);
+      clearTimeout(stop);
+    };
+  }, [extracting]);
 
   const toggleDone = useMutation({
     mutationFn: ({ id, isDone }: { id: string; isDone: boolean }) =>
@@ -45,7 +79,7 @@ export function ActionBoard({ onClose }: { onClose?: () => void }) {
       await qc.cancelQueries({ queryKey: ["action-items"] });
       const prev = qc.getQueryData<{ items: ActionItem[] }>(["action-items"]);
       qc.setQueryData<{ items: ActionItem[] }>(["action-items"], (old) => ({
-        items: (old?.items ?? []).map((item) => item.id === id ? { ...item, isDone } : item),
+        items: (old?.items ?? []).map((item) => (item.id === id ? { ...item, isDone } : item)),
       }));
       return { prev };
     },
@@ -53,6 +87,25 @@ export function ActionBoard({ onClose }: { onClose?: () => void }) {
       qc.setQueryData(["action-items"], ctx?.prev);
     },
     onSettled: () => qc.invalidateQueries({ queryKey: ["action-items"] }),
+  });
+
+  const createItem = useMutation({
+    mutationFn: (description: string) =>
+      fetch("/api/action-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ description }),
+      }).then(async (r) => {
+        if (!r.ok) throw new Error("create failed");
+        return r.json() as Promise<{ item: ActionItem }>;
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["action-items"] });
+      setAddOpen(false);
+      setNewDescription("");
+      toast.success("Action added");
+    },
+    onError: () => toast.error("Failed to add action"),
   });
 
   const deleteItem = useMutation({
@@ -66,14 +119,26 @@ export function ActionBoard({ onClose }: { onClose?: () => void }) {
 
   const extract = async () => {
     setExtracting(true);
+    sessionStorage.setItem(EXTRACT_KEY, String(Date.now()));
     try {
-      await fetch("/api/action-items", { method: "POST" });
-      await qc.invalidateQueries({ queryKey: ["action-items"] });
-      toast.success("Extracted new action items");
+      const res = await fetch("/api/action-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ extract: true }),
+      });
+      if (res.status === 429) {
+        const body = await res.json().catch(() => ({}));
+        toast.error(body.message ?? "Daily extraction limit reached");
+        setExtracting(false);
+        sessionStorage.removeItem(EXTRACT_KEY);
+        return;
+      }
+      if (!res.ok) throw new Error("extract failed");
+      toast.success("Extracting actions in the background…");
     } catch {
-      toast.error("Extraction failed");
-    } finally {
+      toast.error("Extraction failed to start");
       setExtracting(false);
+      sessionStorage.removeItem(EXTRACT_KEY);
     }
   };
 
@@ -86,8 +151,22 @@ export function ActionBoard({ onClose }: { onClose?: () => void }) {
         <div className="flex items-center gap-2 text-sm font-semibold">
           <CheckCircle2 className="size-4 text-primary" />
           Action Board
+          {extracting && (
+            <span className="flex items-center gap-1 text-xs font-normal text-muted-foreground">
+              <Loader2 className="size-3 animate-spin" />
+              Extracting…
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            title="Add action"
+            onClick={() => setAddOpen(true)}
+          >
+            <Plus className="size-4" />
+          </Button>
           <Button
             variant="ghost"
             size="icon-sm"
@@ -116,7 +195,19 @@ export function ActionBoard({ onClose }: { onClose?: () => void }) {
             <CheckCircle2 className="size-8 opacity-30" />
             <div className="space-y-1">
               <p className="text-sm font-medium">No action items</p>
-              <p className="text-xs">Click ✦ to extract to-dos from your urgent emails.</p>
+              <p className="text-xs">
+                Add one manually, or click ✦ to extract to-dos from urgent emails.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
+                <Plus className="size-3.5" />
+                Add action
+              </Button>
+              <Button size="sm" variant="outline" onClick={extract} disabled={extracting}>
+                <Sparkles className="size-3.5" />
+                Extract
+              </Button>
             </div>
           </div>
         ) : (
@@ -124,8 +215,9 @@ export function ActionBoard({ onClose }: { onClose?: () => void }) {
             {items.map((item) => (
               <li key={item.id} className="flex items-start gap-3 px-4 py-3">
                 <button
-                  className="mt-0.5 shrink-0 text-muted-foreground hover:text-primary transition-colors"
+                  className="mt-0.5 shrink-0 text-muted-foreground transition-colors hover:text-primary"
                   onClick={() => toggleDone.mutate({ id: item.id, isDone: !item.isDone })}
+                  title={item.isDone ? "Mark incomplete" : "Mark done"}
                 >
                   {item.isDone ? (
                     <CheckCircle2 className="size-4 text-primary" />
@@ -134,7 +226,12 @@ export function ActionBoard({ onClose }: { onClose?: () => void }) {
                   )}
                 </button>
                 <div className="min-w-0 flex-1">
-                  <p className={cn("text-sm leading-snug", item.isDone && "line-through text-muted-foreground")}>
+                  <p
+                    className={cn(
+                      "text-sm leading-snug",
+                      item.isDone && "text-muted-foreground line-through"
+                    )}
+                  >
                     {item.description}
                   </p>
                   {item.dueDate && (
@@ -162,6 +259,39 @@ export function ActionBoard({ onClose }: { onClose?: () => void }) {
         </div>
       )}
 
+      {/* Add action */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Add action</DialogTitle>
+            <DialogDescription>Track a to-do that isn&apos;t from an email.</DialogDescription>
+          </DialogHeader>
+          <Input
+            placeholder="What needs to be done?"
+            value={newDescription}
+            autoFocus
+            onChange={(e) => setNewDescription(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && newDescription.trim()) {
+                createItem.mutate(newDescription.trim());
+              }
+            }}
+          />
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setAddOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={!newDescription.trim() || createItem.isPending}
+              onClick={() => createItem.mutate(newDescription.trim())}
+            >
+              {createItem.isPending ? "Adding…" : "Add"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete confirmation */}
       <Dialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>

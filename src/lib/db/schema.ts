@@ -158,6 +158,7 @@ export const llmClassifications = pgTable("llm_classifications", {
   modelUsed: varchar("model_used", { length: 50 }),
   promptTokens: integer("prompt_tokens"),
   classifiedAt: timestamp("classified_at", { withTimezone: true }).defaultNow().notNull(),
+  actionsExtractedAt: timestamp("actions_extracted_at", { withTimezone: true }),
 });
 
 // ── action_items ──────────────────────────────────────────────────────────────

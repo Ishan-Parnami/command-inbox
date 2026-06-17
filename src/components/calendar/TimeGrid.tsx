@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { format, isSameDay, isToday } from "date-fns";
+import { endOfDay, format, isToday, startOfDay } from "date-fns";
 import { cn } from "@/lib/utils";
 import { EventChip } from "./EventChip";
 import type { CalEvent } from "./types";
@@ -17,21 +17,32 @@ type Positioned = {
   lanes: number;
 };
 
-function minutesOfDay(iso: string, day: Date): number {
-  const d = new Date(iso);
-  // Clamp events that started on a previous day to 0.
-  if (!isSameDay(d, day)) return d < day ? 0 : 24 * 60;
-  return d.getHours() * 60 + d.getMinutes();
+function eventOverlapsDay(ev: CalEvent, day: Date): boolean {
+  if (!ev.startTime) return false;
+  const start = new Date(ev.startTime);
+  const end = ev.endTime ? new Date(ev.endTime) : start;
+  const dayStart = startOfDay(day);
+  const dayEnd = endOfDay(day);
+  return start <= dayEnd && end >= dayStart;
 }
 
 // Lane-pack overlapping events into side-by-side columns.
 function layoutDay(events: CalEvent[], day: Date): Positioned[] {
+  const dayStart = startOfDay(day);
+  const dayEnd = endOfDay(day);
+
   const timed = events
-    .filter((e) => !e.isAllDay && e.startTime)
+    .filter((e) => !e.isAllDay && e.startTime && eventOverlapsDay(e, day))
     .map((e) => {
-      const startMin = minutesOfDay(e.startTime!, day);
-      const endRaw = e.endTime ? minutesOfDay(e.endTime, day) : startMin + 30;
-      const endMin = Math.max(endRaw, startMin + 20);
+      const start = new Date(e.startTime!);
+      const end = e.endTime ? new Date(e.endTime) : new Date(start.getTime() + 30 * 60_000);
+      const clampedStart = start < dayStart ? dayStart : start;
+      const clampedEnd = end > dayEnd ? dayEnd : end;
+      const startMin = clampedStart.getHours() * 60 + clampedStart.getMinutes();
+      const endMin = Math.max(
+        clampedEnd.getHours() * 60 + clampedEnd.getMinutes(),
+        startMin + 20
+      );
       return { ev: e, startMin, endMin, lane: 0, lanes: 1 } as Positioned;
     })
     .sort((a, b) => a.startMin - b.startMin || a.endMin - b.endMin);
@@ -106,7 +117,7 @@ export function TimeGrid({
 
   const allDayByDay = days.map((day) =>
     events.filter(
-      (e) => e.isAllDay && e.startTime && isSameDay(new Date(e.startTime), day)
+      (e) => e.isAllDay && e.startTime && eventOverlapsDay(e, day)
     )
   );
   const hasAllDay = allDayByDay.some((list) => list.length > 0);

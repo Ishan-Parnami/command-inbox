@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
+import { after } from "next/server";
 import { and, desc, eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { actionItems } from "@/lib/db/schema";
 import { extractActionItems } from "@/lib/llm/extract";
 import { enforceAiQuota, QuotaExceededError } from "@/lib/billing/quota";
+import { broadcastToUser } from "@/lib/sse";
 
 export async function GET() {
   const session = await auth();
@@ -24,11 +26,26 @@ export async function GET() {
   }
 }
 
-// POST /api/action-items — trigger extraction
-export async function POST() {
+// POST /api/action-items — create manual item OR start background extraction
+export async function POST(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const userId = session.user.id;
+
+  const body = (await req.json().catch(() => ({}))) as {
+    description?: string;
+    extract?: boolean;
+  };
+
+  const description = body.description?.trim();
+  if (description) {
+    const [item] = await db
+      .insert(actionItems)
+      .values({ userId, description })
+      .returning();
+    broadcastToUser(userId, { type: "action_items.updated" });
+    return NextResponse.json({ item });
+  }
 
   try {
     await enforceAiQuota(userId, "action_extract");
@@ -42,8 +59,17 @@ export async function POST() {
     throw e;
   }
 
-  await extractActionItems(userId);
-  return NextResponse.json({ ok: true });
+  // Run extraction after the response so the user can navigate away.
+  after(async () => {
+    try {
+      await extractActionItems(userId);
+    } catch (err) {
+      console.error("[action-items] background extract failed:", err);
+      broadcastToUser(userId, { type: "action_items.extract_done", inserted: 0, error: true });
+    }
+  });
+
+  return NextResponse.json({ ok: true, started: true }, { status: 202 });
 }
 
 // PATCH /api/action-items — mark done

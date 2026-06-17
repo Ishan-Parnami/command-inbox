@@ -157,7 +157,7 @@ export function ComposeModal({
                 if (toKb.handleKeyDown(e)) return;
               }}
               placeholder="To — type @ for contacts"
-              className="border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+              className="border-0 bg-transparent shadow-none focus-visible:ring-0"
             />
             {!showCc && (
               <button
@@ -202,7 +202,7 @@ export function ComposeModal({
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
               placeholder="Subject"
-              className="border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+              className="border-0 bg-transparent shadow-none focus-visible:ring-0"
             />
           </div>
           <Textarea

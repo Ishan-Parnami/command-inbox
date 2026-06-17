@@ -53,7 +53,10 @@ function handleSSEEvent(event: SSEEvent, queryClient: ReturnType<typeof useQuery
   if (type === "brief.ready") {
     queryClient.invalidateQueries({ queryKey: ["brief", event.eventId] });
   }
-  if (type === "action_items.updated") {
+  if (type === "action_items.updated" || type === "action_items.extract_done") {
     queryClient.invalidateQueries({ queryKey: ["action-items"] });
+    if (type === "action_items.extract_done") {
+      window.dispatchEvent(new CustomEvent("action-items-extract-done"));
+    }
   }
 }
