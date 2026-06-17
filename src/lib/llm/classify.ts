@@ -4,6 +4,7 @@ import { Type, type Schema } from "@google/genai";
 import { db } from "@/lib/db";
 import { emails, llmClassifications } from "@/lib/db/schema";
 import { generateJSON, MODELS } from "@/lib/gemini/client";
+import { tryConsumeBackgroundClassify } from "@/lib/billing/quota";
 
 // Cheap, high-volume per-email triage with Gemini Flash-Lite → llm_classifications.
 
@@ -52,7 +53,10 @@ score: 0..1 within the tier (1 = top of tier)
 summary: one short sentence.`;
 }
 
-export async function classifyEmail(email: ClassifiableEmail) {
+export async function classifyEmail(userId: string, email: ClassifiableEmail) {
+  const allowed = await tryConsumeBackgroundClassify(userId);
+  if (!allowed) return false;
+
   const c = await generateJSON<Classification>(buildPrompt(email), {
     schema: CLASSIFY_SCHEMA,
     model: MODELS.classify,
@@ -78,6 +82,7 @@ export async function classifyEmail(email: ClassifiableEmail) {
         classifiedAt: new Date(),
       },
     });
+  return true;
 }
 
 /** Classify the user's most recent still-unclassified emails (bounded for cost). */
@@ -97,11 +102,13 @@ export async function classifyUnclassified(userId: string, limit = 25): Promise<
     .limit(limit);
 
   let done = 0;
-  // Small concurrency to keep the sync request snappy without hammering the API.
   for (let i = 0; i < rows.length; i += 5) {
     const batch = rows.slice(i, i + 5);
-    const results = await Promise.allSettled(batch.map((e) => classifyEmail(e)));
-    done += results.filter((r) => r.status === "fulfilled").length;
+    const results = await Promise.allSettled(batch.map((e) => classifyEmail(userId, e)));
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value === true) done++;
+      if (r.status === "fulfilled" && r.value === false) return done;
+    }
   }
   return done;
 }

@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
-import { GoogleGenAI, Type, type Tool, type Content } from "@google/genai";
+import { Type, type Tool, type Content } from "@google/genai";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { agentConversations } from "@/lib/db/schema";
-import { MODELS } from "@/lib/gemini/client";
+import { MODELS, withGeminiRetry } from "@/lib/gemini/client";
+import { enforceAiQuota, QuotaExceededError } from "@/lib/billing/quota";
 import {
   sendMessage,
   archiveMessage,
@@ -15,10 +16,9 @@ import {
 } from "@/lib/corsair/client";
 import { gmailAddress } from "@/lib/email/send";
 import { buildRawMessage } from "@/lib/email/mime";
+import { withEmailSignature } from "@/lib/email/signature";
 import { contactDirectory } from "@/lib/contacts";
 import { searchEmailsForAgent } from "@/lib/search/agent";
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
 
 // ── Tool definitions ──────────────────────────────────────────────────────────
 const TOOLS: Tool[] = [
@@ -120,7 +120,8 @@ async function runTool(
   userId: string,
   name: string,
   args: Record<string, unknown>,
-  timeZone: string
+  timeZone: string,
+  senderName: string | null
 ): Promise<unknown> {
   console.log(`[agent:tool] ${name} called`, { userId, args: JSON.stringify(args) });
   switch (name) {
@@ -132,11 +133,12 @@ async function runTool(
 
     case "send_email": {
       const from = await gmailAddress(userId);
+      const body = withEmailSignature(String(args.body), senderName ?? from);
       const raw = buildRawMessage({
         from,
         to: [String(args.to)],
         subject: String(args.subject),
-        body: String(args.body),
+        body,
       });
       return sendMessage(userId, raw);
     }
@@ -194,6 +196,18 @@ export async function POST(req: Request) {
   if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const userId = session.user.id;
 
+  try {
+    await enforceAiQuota(userId, "agent");
+  } catch (e) {
+    if (e instanceof QuotaExceededError) {
+      return NextResponse.json(e.toJSON(), {
+        status: 429,
+        headers: { "Retry-After": String(e.retryAfterSeconds) },
+      });
+    }
+    throw e;
+  }
+
   const { message, conversationId, timeZone: clientTz } = (await req.json().catch(() => ({}))) as {
     message?: string;
     conversationId?: string;
@@ -235,6 +249,7 @@ export async function POST(req: Request) {
   history.push({ role: "user", parts: [{ text: message }] });
 
   const directory = await contactDirectory(userId);
+  const senderName = session.user.name ?? (await gmailAddress(userId));
   const system = `You are Command Inbox's AI assistant. Today is ${new Date().toDateString()}.
 Help the user manage their Gmail inbox and Google Calendar.
 
@@ -246,6 +261,10 @@ Scheduling rules:
 - Infer sensible defaults: if no duration is given, make the event 1 hour; interpret relative times against today in the user's timezone.
 - For create_calendar_event startTime/endTime, pass local datetimes WITHOUT "Z" or UTC offset (e.g. "2026-06-16T17:00:00" for 5pm local). The server attaches the user's timezone.
 - After a tool succeeds, always write a one-line confirmation of what you did. Never reply with an empty message.
+
+Email rules:
+- When drafting or sending email, write the body without a sign-off — the app appends "Best, ${senderName ?? "the user"}" automatically.
+- For meeting invitations, include RSVP instructions in the body when appropriate.
 ${directory ? `\nKnown contacts (resolve any name the user mentions to their email for "to"/attendees):\n${directory}` : ""}
 
 Be concise. When you take an action, confirm what you did.`;
@@ -266,11 +285,13 @@ Be concise. When you take an action, confirm what you did.`;
           console.log(`[agent] turn ${turn + 1}/8 — calling Gemini, contents length:`, contents.length);
           let res;
           try {
-            res = await ai.models.generateContent({
-              model: MODELS.agent,
-              contents,
-              config: { systemInstruction: system, tools: TOOLS },
-            });
+            res = await withGeminiRetry((ai) =>
+              ai.models.generateContent({
+                model: MODELS.agent,
+                contents,
+                config: { systemInstruction: system, tools: TOOLS },
+              })
+            );
           } catch (geminiErr) {
             logError(`[agent] turn ${turn + 1} Gemini generateContent failed:`, geminiErr);
             throw geminiErr;
@@ -304,7 +325,7 @@ Be concise. When you take an action, confirm what you did.`;
             send({ type: "tool_start", tool: fn.name });
             let result: unknown;
             try {
-              result = await runTool(userId, fn.name!, (fn.args ?? {}) as Record<string, unknown>, timeZone);
+              result = await runTool(userId, fn.name!, (fn.args ?? {}) as Record<string, unknown>, timeZone, senderName ?? null);
               actionsTaken.push(fn.name!);
             } catch (e) {
               logError(`[agent] tool ${fn.name} threw:`, e);

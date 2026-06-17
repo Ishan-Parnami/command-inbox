@@ -63,26 +63,21 @@ export function NaturalInputBar({
     const trimmed = text.trim();
     if (!trimmed || loading) return;
     setLoading(true);
-    console.log("[parse:client] submit:", trimmed);
     try {
       const res = await fetch("/api/parse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: trimmed }),
       });
-      console.log("[parse:client] response status:", res.status);
       if (!res.ok) {
-        const errBody = await res.text().catch(() => "");
-        console.error("[parse:client] failed:", { status: res.status, body: errBody });
+        await res.text().catch(() => "");
         throw new Error("parse failed");
       }
       const result = (await res.json()) as ParseResult;
-      console.log("[parse:client] result:", result);
       onResult(result);
       setText("");
       onOpenChange(false);
-    } catch (e) {
-      console.error("[parse:client] error:", e);
+    } catch {
       toast.error("Couldn't understand that — try rephrasing.");
     } finally {
       setLoading(false);

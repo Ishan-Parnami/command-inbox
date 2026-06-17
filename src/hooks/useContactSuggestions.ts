@@ -23,16 +23,31 @@ function committedEmails(value: string) {
   return emails;
 }
 
-// Suggestions appear only after typing @ — uniform across compose, calendar, agent, natural input.
+/** Start index of the current comma-separated recipient segment. */
+function segmentStart(value: string): number {
+  return Math.max(value.lastIndexOf(","), value.lastIndexOf(";")) + 1;
+}
+
+/** @mention index when @ is the first character of the active segment (not inside an email). */
+function mentionAt(value: string): number {
+  const start = segmentStart(value);
+  const segment = value.slice(start);
+  const leading = segment.length - segment.trimStart().length;
+  const trimmed = segment.trimStart();
+  if (!trimmed.startsWith("@")) return -1;
+  return start + leading;
+}
+
+// Suggestions appear only after typing @ at the start of a recipient segment.
 export function useContactSuggestions(value: string) {
   const { data } = useContacts();
   const contacts = data?.contacts ?? [];
   const alreadyEmails = committedEmails(value);
 
-  const at = value.lastIndexOf("@");
+  const at = mentionAt(value);
   if (at === -1) return { token: "", suggestions: [] as Contact[] };
   const token = value.slice(at + 1).trim().toLowerCase();
-  if (!token || /\s/.test(token)) return { token: "", suggestions: [] as Contact[] };
+  if (/\s/.test(token)) return { token: "", suggestions: [] as Contact[] };
 
   const suggestions = contacts
     .filter((c) => !alreadyEmails.has(c.email.toLowerCase()))
@@ -46,22 +61,24 @@ export function useContactSuggestions(value: string) {
   return { token, suggestions };
 }
 
-// Insert a picked contact at the active @mention. `trailing` is appended after the label (e.g. ", ").
+// Replace the active recipient segment with the picked contact.
 export function applyContactMention(value: string, contact: Contact, trailing = " ") {
-  const at = value.lastIndexOf("@");
+  const start = segmentStart(value);
+  const before = value.slice(0, start);
   const label = contact.name ? `${contact.name} <${contact.email}>` : contact.email;
-  if (at === -1) return `${value}${label}${trailing}`;
-  return `${value.slice(0, at)}${label}${trailing}`;
+  return `${before}${label}${trailing}`;
 }
 
 /** Extract resolved email addresses from a To/Cc/attendees field (supports @mentions and plain emails). */
 export function parseRecipientField(value: string): string[] {
   const emails: string[] = [];
-  for (const m of value.matchAll(/<([^>]+@[^>]+)>/g)) {
-    const e = m[1].trim();
-    if (EMAIL_RE.test(e)) emails.push(e);
-  }
   for (const part of value.split(",").map((p) => p.trim()).filter(Boolean)) {
+    const bracket = part.match(/^(.+?)\s*<([^>]+@[^>]+)>$/);
+    if (bracket) {
+      const e = bracket[2].trim();
+      if (EMAIL_RE.test(e)) emails.push(e);
+      continue;
+    }
     if (EMAIL_RE.test(part)) emails.push(part);
   }
   return emails;
@@ -71,7 +88,7 @@ export function parseRecipientField(value: string): string[] {
 export function hasUnresolvedRecipients(value: string): boolean {
   if (!value.trim()) return false;
   for (const part of value.split(",").map((p) => p.trim()).filter(Boolean)) {
-    if (/<[^>]+@[^>]+>/.test(part)) continue;
+    if (/^(.+?)\s*<[^>]+@[^>]+>$/.test(part)) continue;
     if (EMAIL_RE.test(part)) continue;
     return true;
   }

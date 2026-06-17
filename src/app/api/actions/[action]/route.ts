@@ -73,15 +73,19 @@ export async function POST(req: Request, ctx: { params: Promise<{ action: string
     .from(emails)
     .where(eq(emails.threadId, threadId));
 
-  try {
-    await Promise.all(msgs.map((m) => op(userId, m.gid)));
-  } catch (e) {
-    if (e instanceof CorsairAuthError) {
-      return NextResponse.json({ error: "reconnect", signInLink: e.signInLink }, { status: 409 });
+  const gids = msgs.map((m) => m.gid).filter((id): id is string => !!id);
+
+  if (gids.length) {
+    const results = await Promise.allSettled(gids.map((gid) => op(userId, gid)));
+    const authError = results.find(
+      (r) => r.status === "rejected" && r.reason instanceof CorsairAuthError
+    );
+    if (authError?.status === "rejected" && authError.reason instanceof CorsairAuthError) {
+      return NextResponse.json({ error: "reconnect", signInLink: authError.reason.signInLink }, { status: 409 });
     }
-    return NextResponse.json({ error: "gmail_failed" }, { status: 502 });
   }
 
+  // Mirror locally even if some Gmail mutations fail (stale/deleted message ids).
   await db.update(emailThreads).set({ ...set, updatedAt: new Date() }).where(eq(emailThreads.id, threadId));
   return NextResponse.json({ ok: true });
 }

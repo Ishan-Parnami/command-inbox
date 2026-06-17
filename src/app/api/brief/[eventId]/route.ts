@@ -4,12 +4,14 @@ import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { calendarEvents, calendarEventAttendees, emails } from "@/lib/db/schema";
 import { generateText } from "@/lib/gemini/client";
+import { enforceAiQuota, QuotaExceededError } from "@/lib/billing/quota";
 
-export async function GET(_req: Request, { params }: { params: Promise<{ eventId: string }> }) {
+export async function GET(req: Request, { params }: { params: Promise<{ eventId: string }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const userId = session.user.id;
   const { eventId } = await params;
+  const regenerate = new URL(req.url).searchParams.get("regenerate") === "1";
 
   const [event] = await db
     .select()
@@ -22,10 +24,40 @@ export async function GET(_req: Request, { params }: { params: Promise<{ eventId
     .from(calendarEventAttendees)
     .where(eq(calendarEventAttendees.eventId, eventId));
 
-  // Return cached brief if fresh (< 6 hours).
-  if (event.aiBrief && event.briefGeneratedAt) {
+  // Return cached brief if fresh (< 6 hours), unless user asked to regenerate.
+  if (!regenerate && event.aiBrief && event.briefGeneratedAt) {
     const ageMs = Date.now() - event.briefGeneratedAt.getTime();
-    if (ageMs < 6 * 3600 * 1000) return NextResponse.json({ brief: event.aiBrief, cached: true });
+    if (ageMs < 6 * 3600 * 1000) {
+      return NextResponse.json({
+        brief: event.aiBrief,
+        previousBrief: event.previousAiBrief ?? null,
+        canRegenerate: !event.previousAiBrief,
+        cached: true,
+      });
+    }
+  }
+
+  // At most two versions per event: original + one regeneration.
+  if (regenerate && event.previousAiBrief) {
+    return NextResponse.json({
+      brief: event.aiBrief,
+      previousBrief: event.previousAiBrief,
+      canRegenerate: false,
+      cached: true,
+      message: "Maximum brief versions reached",
+    });
+  }
+
+  try {
+    await enforceAiQuota(userId, "brief");
+  } catch (e) {
+    if (e instanceof QuotaExceededError) {
+      return NextResponse.json(e.toJSON(), {
+        status: 429,
+        headers: { "Retry-After": String(e.retryAfterSeconds) },
+      });
+    }
+    throw e;
   }
 
   // Gather attendee emails (excluding self).
@@ -67,7 +99,7 @@ Write a concise pre-meeting brief (3-5 bullet points) covering:
 - Any action items or decisions needed
 - Suggested talking points
 
-Keep it under 200 words. Plain text, use • bullets.`;
+Keep it under 200 words. Plain text only — no markdown, no asterisks, no bold. Use • for top-level bullets and indent sub-points with a single leading space.`;
 
   // Build a fallback brief from whatever data we have, so the feature never
   // fails flat even when the model is unavailable or returns nothing.
@@ -97,9 +129,23 @@ Keep it under 200 words. Plain text, use • bullets.`;
   if (!degraded) {
     await db
       .update(calendarEvents)
-      .set({ aiBrief: brief, briefGeneratedAt: new Date(), updatedAt: new Date() })
+      .set({
+        aiBrief: brief,
+        previousAiBrief: regenerate && event.aiBrief ? event.aiBrief : event.previousAiBrief,
+        briefGeneratedAt: new Date(),
+        updatedAt: new Date(),
+      })
       .where(eq(calendarEvents.id, eventId));
   }
 
-  return NextResponse.json({ brief, cached: false, degraded });
+  const previousBrief =
+    regenerate && event.aiBrief && !degraded ? event.aiBrief : event.previousAiBrief ?? null;
+
+  return NextResponse.json({
+    brief,
+    previousBrief,
+    canRegenerate: !previousBrief,
+    cached: false,
+    degraded,
+  });
 }

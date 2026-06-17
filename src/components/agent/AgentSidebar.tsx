@@ -29,6 +29,8 @@ import {
   ContactSuggestionList,
   useContactSuggestionKeyboard,
 } from "@/components/shared/ContactSuggestionList";
+import { AiCooldownBanner } from "@/components/shared/AiCooldownBanner";
+import { setAiQuotaCooldown } from "@/hooks/useAiQuota";
 
 type ConversationSummary = { id: string; title: string; count: number; updatedAt: string };
 
@@ -120,7 +122,6 @@ export function AgentSidebar() {
       conversationId,
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     };
-    console.log("[agent:client] send →", reqPayload);
 
     try {
       const res = await fetch("/api/agent", {
@@ -129,10 +130,23 @@ export function AgentSidebar() {
         body: JSON.stringify(reqPayload),
         signal: ctrl.signal,
       });
-      console.log("[agent:client] response status:", res.status, res.statusText);
       if (!res.ok || !res.body) {
         const errBody = await res.text().catch(() => "");
-        console.error("[agent:client] request failed:", { status: res.status, body: errBody });
+        if (res.status === 429) {
+          try {
+            const quotaError = JSON.parse(errBody);
+            if (quotaError.error === "quota_exceeded") {
+              setAiQuotaCooldown(quotaError);
+              updateLastMessage(
+                "You've reached your daily AI assistant limit. Please try again later."
+              );
+              setStreaming(false);
+              return;
+            }
+          } catch {
+            // ignore
+          }
+        }
         throw new Error(`Agent request failed (${res.status})`);
       }
 
@@ -153,46 +167,34 @@ export function AgentSidebar() {
           let ev: Record<string, unknown>;
           try {
             ev = JSON.parse(line.slice(6));
-          } catch (parseErr) {
-            console.error("[agent:client] SSE parse error:", { line, parseErr });
+          } catch {
             continue;
           }
-          console.log("[agent:client] SSE event:", ev);
           if (ev.type === "text") {
             assistantText += ev.chunk;
             updateLastMessage(assistantText);
             scrollToBottom();
           } else if (ev.type === "tool_start") {
-            console.log("[agent:client] tool_start:", ev.tool);
             appendToolCall(assistantId, ev.tool as string);
           } else if (ev.type === "tool_done") {
-            console.log("[agent:client] tool_done:", ev.tool, ev.result);
             resolveToolCall(assistantId, ev.tool as string, ev.result);
           } else if (ev.type === "error") {
             errored = true;
-            console.error("[agent:client] server error event:", ev.message, ev);
             assistantText = "Sorry, something went wrong handling that. Please try again.";
             updateLastMessage(assistantText);
           } else if (ev.type === "done" && ev.conversationId) {
-            console.log("[agent:client] done, conversationId:", ev.conversationId);
             setConversationId(ev.conversationId as string);
           }
         }
       }
 
-      console.log("[agent:client] stream complete:", { errored, assistantTextLength: assistantText.length });
-
       // Guarantee a non-empty bubble even if the stream sent no text.
       if (!errored && !assistantText.trim()) {
-        console.warn("[agent:client] empty assistant reply — using fallback");
         updateLastMessage("Done. Let me know if you need anything else.");
       }
     } catch (e) {
       if ((e as Error).name !== "AbortError") {
-        console.error("[agent:client] fetch/stream error:", e);
         updateLastMessage("Sorry, something went wrong. Please try again.");
-      } else {
-        console.log("[agent:client] aborted by user");
       }
     } finally {
       setStreaming(false);
@@ -333,7 +335,8 @@ export function AgentSidebar() {
       </div>
 
       {/* Input */}
-      <div className="shrink-0 border-t p-3">
+      <div className="shrink-0 border-t p-3 space-y-2">
+        <AiCooldownBanner feature="agent" />
         <div className="relative flex items-end gap-2">
           {inputFocused && contactSuggestions.suggestions.length > 0 && (
             <ContactSuggestionList

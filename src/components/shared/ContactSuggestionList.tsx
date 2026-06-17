@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { Contact } from "@/hooks/useContactSuggestions";
 
@@ -10,10 +10,11 @@ export function useContactSuggestionKeyboard(
   active: boolean
 ) {
   const [highlightIndex, setHighlightIndex] = useState(0);
+  const suggestionKey = useMemo(() => suggestions.map((s) => s.email).join("\0"), [suggestions]);
 
   useEffect(() => {
     setHighlightIndex(0);
-  }, [suggestions]);
+  }, [suggestionKey]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!active || suggestions.length === 0) return false;
@@ -54,9 +55,17 @@ export function ContactSuggestionList({
   onPick: (contact: Contact) => void;
   position?: "above" | "below";
 }) {
+  const listRef = useRef<HTMLUListElement>(null);
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  useEffect(() => {
+    itemRefs.current[highlightIndex]?.scrollIntoView({ block: "nearest" });
+  }, [highlightIndex]);
+
   if (suggestions.length === 0) return null;
   return (
     <ul
+      ref={listRef}
       className={cn(
         "absolute left-0 right-0 z-50 max-h-48 overflow-auto rounded-md border bg-popover py-1 shadow-md",
         position === "above" ? "bottom-full mb-0.5" : "top-full mt-0.5"
@@ -65,6 +74,9 @@ export function ContactSuggestionList({
       {suggestions.map((c, i) => (
         <li key={c.email}>
           <button
+            ref={(el) => {
+              itemRefs.current[i] = el;
+            }}
             type="button"
             onMouseDown={(e) => {
               e.preventDefault();
@@ -72,7 +84,7 @@ export function ContactSuggestionList({
             }}
             className={cn(
               "flex w-full flex-col items-start px-3 py-1.5 text-left text-sm hover:bg-accent",
-              i === highlightIndex && "bg-accent"
+              i === highlightIndex && "bg-accent ring-1 ring-inset ring-primary/30"
             )}
           >
             <span className="font-medium">{c.name || c.email}</span>

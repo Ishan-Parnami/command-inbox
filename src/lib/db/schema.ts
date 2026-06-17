@@ -278,6 +278,7 @@ export const calendarEvents = pgTable("calendar_events", {
     onDelete: "set null",
   }),
   aiBrief: text("ai_brief"),
+  previousAiBrief: text("previous_ai_brief"),
   briefGeneratedAt: timestamp("brief_generated_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

@@ -3,6 +3,9 @@ import { Type, type Schema } from "@google/genai";
 import { auth } from "@/auth";
 import { generateJSON, MODELS } from "@/lib/gemini/client";
 import { contactDirectory } from "@/lib/contacts";
+import { enforceAiQuota, QuotaExceededError } from "@/lib/billing/quota";
+import { gmailAddress } from "@/lib/email/send";
+import { withEmailSignature } from "@/lib/email/signature";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +51,18 @@ export async function POST(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
+  try {
+    await enforceAiQuota(session.user.id, "parse");
+  } catch (e) {
+    if (e instanceof QuotaExceededError) {
+      return NextResponse.json(e.toJSON(), {
+        status: 429,
+        headers: { "Retry-After": String(e.retryAfterSeconds) },
+      });
+    }
+    throw e;
+  }
+
   const { text } = (await req.json().catch(() => ({}))) as { text?: string };
   if (!text || !text.trim())
     return NextResponse.json({ error: "text required" }, { status: 400 });
@@ -56,12 +71,15 @@ export async function POST(req: Request) {
 
   const now = new Date();
   const directory = await contactDirectory(session.user.id);
+  const senderName = session.user.name ?? (await gmailAddress(session.user.id)) ?? "me";
   console.log("[parse] contact directory:", directory ? `${directory.split("\n").length} contacts` : "none");
   const system = `You convert a single natural-language instruction into structured JSON for an email/calendar app.
 Today is ${now.toISOString()} (${now.toString()}).
-- Decide intent: "email" to draft/send a message, "event" to schedule a calendar event.
+- Decide intent: "email" to draft/send a message, or "event" to schedule a calendar event.
 - For events, resolve relative times (e.g. "tomorrow 3pm", "next Monday") against today and output ISO 8601. If no end time is given, default to 1 hour after start.
 - For emails, write a concise subject and a short polite body. Put the recipient in "to".
+- Do NOT add a sign-off or signature line at the end of the body (the app adds one automatically).
+- For meeting invitations in email form, mention RSVP if appropriate.
 ${directory ? `- Known contacts (resolve any person's name mentioned to their email; use the email in "to"/attendees):\n${directory}` : "- If a name has no known email, put the raw name in the field."}
 Return JSON only.`;
 
@@ -71,6 +89,9 @@ Return JSON only.`;
       system,
       schema: PARSE_SCHEMA,
     });
+    if (result.intent === "email" && result.email?.body) {
+      result.email.body = withEmailSignature(result.email.body, senderName);
+    }
     console.log("[parse] result:", JSON.stringify(result));
     return NextResponse.json(result);
   } catch (e) {

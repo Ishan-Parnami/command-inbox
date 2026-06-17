@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { and, asc, eq, gte, lte } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lte } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { calendarEvents, calendarEventAttendees } from "@/lib/db/schema";
@@ -34,9 +34,7 @@ export async function GET(req: Request) {
     ? await db
         .select()
         .from(calendarEventAttendees)
-        .where(
-          and(...rows.map((r) => eq(calendarEventAttendees.eventId, r.id)))
-        )
+        .where(inArray(calendarEventAttendees.eventId, rows.map((r) => r.id)))
     : [];
 
   const attendeeMap: Record<string, typeof attendeeRows> = {};

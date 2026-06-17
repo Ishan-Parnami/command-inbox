@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { actionItems } from "@/lib/db/schema";
 import { extractActionItems } from "@/lib/llm/extract";
+import { enforceAiQuota, QuotaExceededError } from "@/lib/billing/quota";
 
 export async function GET() {
   const session = await auth();
@@ -28,6 +29,18 @@ export async function POST() {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const userId = session.user.id;
+
+  try {
+    await enforceAiQuota(userId, "action_extract");
+  } catch (e) {
+    if (e instanceof QuotaExceededError) {
+      return NextResponse.json(e.toJSON(), {
+        status: 429,
+        headers: { "Retry-After": String(e.retryAfterSeconds) },
+      });
+    }
+    throw e;
+  }
 
   await extractActionItems(userId);
   return NextResponse.json({ ok: true });

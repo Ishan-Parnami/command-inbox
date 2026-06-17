@@ -65,6 +65,46 @@ export function getThread(userId: string, id: string) {
   return tenant(userId).run("gmail.api.threads.get", { id, format: "full" }).then(unwrap);
 }
 
+/** Gmail REST message ids are hex strings without dashes (not Corsair DB uuids). */
+export function isGmailApiId(id: string): boolean {
+  return /^[0-9a-f]{10,}$/i.test(id);
+}
+
+// Recursively find the first hex Gmail id stored under a key matching `keyRe`.
+// Corsair DB rows vary in shape (flat columns vs nested message objects), so we
+// scan a few levels deep instead of assuming fixed top-level keys.
+function deepFindHexByKey(value: unknown, keyRe: RegExp, depth = 0): string | null {
+  if (!value || typeof value !== "object" || depth > 3) return null;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = deepFindHexByKey(item, keyRe, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  const row = value as Record<string, unknown>;
+  for (const [k, v] of Object.entries(row)) {
+    if (keyRe.test(k) && typeof v === "string" && isGmailApiId(v)) return v;
+  }
+  for (const v of Object.values(row)) {
+    if (v && typeof v === "object") {
+      const found = deepFindHexByKey(v, keyRe, depth + 1);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/** Corsair DB row → Gmail API message id (hex) when present, scanning nested shapes. */
+export function pickGmailApiMessageId(row: Record<string, unknown>): string | null {
+  return deepFindHexByKey(row, /(?:^id$|message.?id|gmail.?id|google.?id|external.?id)/i);
+}
+
+/** Corsair DB row → Gmail thread id (hex) when present, scanning nested shapes. */
+export function pickGmailThreadId(row: Record<string, unknown>): string | null {
+  return deepFindHexByKey(row, /thread.?id/i);
+}
+
 /**
  * Corsair-cached local Gmail search (sub-second, no live Gmail round-trip).
  * The synced DB filters by column with operators (no free-text "query" column),

@@ -10,6 +10,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
+import { UsageMeter } from "@/components/shared/UsageMeter";
 
 export function UserMenu() {
   const { data } = useSession();
@@ -32,6 +33,8 @@ export function UserMenu() {
           <p className="truncate text-sm font-medium">{user?.name ?? "Signed in"}</p>
           <p className="truncate text-xs text-muted-foreground">{user?.email}</p>
         </div>
+        <DropdownMenuSeparator />
+        <UsageMeter />
         <DropdownMenuSeparator />
         <DropdownMenuItem variant="destructive" onClick={() => signOut({ callbackUrl: "/" })}>
           <LogOut />

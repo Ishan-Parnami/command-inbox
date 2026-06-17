@@ -16,7 +16,7 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 import { CommandPalette, type PaletteGroup } from "@/components/shared/CommandPalette";
 import { ComposeModal, type ComposeDraft, type SendPayload } from "@/components/compose/ComposeModal";
 import { DraftsMenu } from "@/components/compose/DraftsMenu";
-import { CalendarSidebar } from "@/components/calendar/CalendarSidebar";
+import { CalendarView } from "@/components/calendar/CalendarView";
 import type { EventSeed } from "@/components/calendar/CreateEventModal";
 import { AgentSidebar } from "@/components/agent/AgentSidebar";
 import { ActionBoard } from "@/components/actions/ActionBoard";
@@ -769,7 +769,7 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
         {mainView === "agent" && <AgentSidebar />}
         {mainView === "inbox" && inboxPane}
         {mainView === "calendar" && (
-          <CalendarSidebar
+          <CalendarView
             key={`${calSeed.title}-${calSeed.startTime}`}
             initialSeed={calSeed}
           />
