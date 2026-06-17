@@ -1,7 +1,0 @@
-{
-  "crons": [
-    { "path": "/api/cron/send-later", "schedule": "*/15 * * * *" },
-    { "path": "/api/cron/calendar-sync", "schedule": "*/15 * * * *" },
-    { "path": "/api/cron/snooze", "schedule": "*/2 * * * *" }
-  ]
-}
