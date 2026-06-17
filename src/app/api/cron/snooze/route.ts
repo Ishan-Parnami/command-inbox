@@ -3,13 +3,11 @@ import { and, eq, isNotNull, lte } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { emailThreads } from "@/lib/db/schema";
 import { broadcastToUser } from "@/lib/sse";
+import { isAuthorizedCron } from "@/lib/cron-auth";
 
-// Called by Vercel Cron every minute to wake snoozed threads.
+// Wakes snoozed threads. Schedule about every minute.
 export async function GET(req: Request) {
-  const authorized =
-    req.headers.get("x-vercel-cron") !== null ||
-    req.headers.get("authorization") === `Bearer ${process.env.CRON_SECRET}`;
-  if (!authorized) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!isAuthorizedCron(req)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const now = new Date();
 

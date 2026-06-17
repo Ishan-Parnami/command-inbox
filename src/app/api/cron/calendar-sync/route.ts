@@ -3,18 +3,11 @@ import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { corsairConnections } from "@/lib/db/schema";
 import { syncCalendar } from "@/lib/sync/calendar";
+import { isAuthorizedCron } from "@/lib/cron-auth";
 
-function cronAuthorized(req: Request): boolean {
-  return (
-    req.headers.get("x-vercel-cron") !== null ||
-    (!!process.env.CRON_SECRET &&
-      req.headers.get("authorization") === `Bearer ${process.env.CRON_SECRET}`)
-  );
-}
-
-// Re-sync calendar mirrors for every connected user (every 15 min on Vercel).
+// Re-sync calendar mirrors for every connected user. Schedule every ~15 min.
 export async function GET(req: Request) {
-  if (!cronAuthorized(req)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!isAuthorizedCron(req)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const conns = await db
     .select({ userId: corsairConnections.userId, email: corsairConnections.connectedEmail })

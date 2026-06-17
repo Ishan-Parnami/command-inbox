@@ -1,21 +1,21 @@
 import "server-only";
-import { createClient, type RunResult } from "@corsair-dev/app";
+import { AuthMissingError } from "corsair";
+import { generateOAuthUrl, processOAuthCallback } from "corsair/oauth";
+import { corsair } from "@/corsair";
 import { parseSearchQuery } from "@/lib/search/query";
 
-// ── Hosted Corsair client (singleton) ─────────────────────────────────────────
-// Corsair stores OAuth tokens server-side per tenant.
-const client = createClient({ apiKey: process.env.CORSAIR_DEV_KEY! });
-const instance = client.instance(process.env.CORSAIR_INSTANCE_ID!);
+// ── Self-hosted Corsair client ────────────────────────────────────────────────
+// OAuth tokens are stored per tenant in corsair_accounts. Tenant id == our user id.
 
-/** TenantScope for a given app user. Tenant id == our user id. */
+/** Tenant-scoped SDK client for a given app user. */
 export function tenant(tenantId: string) {
-  return instance.tenant(tenantId);
+  return corsair.withTenant(tenantId);
 }
 
 /**
- * Unwrap a `tenant.run()` result. Throws {@link CorsairAuthError} carrying the
- * Corsair-hosted sign-in link when the user hasn't connected the provider yet,
- * so route handlers can redirect to it.
+ * Thrown when a tenant hasn't connected the provider yet. `signInLink` points at
+ * our own connect route, which kicks off the Google OAuth flow. Route handlers
+ * return it as JSON and the frontend redirects the browser there.
  */
 export class CorsairAuthError extends Error {
   constructor(public signInLink: string) {
@@ -24,45 +24,57 @@ export class CorsairAuthError extends Error {
   }
 }
 
-function unwrap<T>(res: RunResult<T>): T {
-  if (!res.success) throw new CorsairAuthError(res.signInLink);
-  return res.data;
-}
-
 // ── OAuth / connection ────────────────────────────────────────────────────────
 export type Provider = "gmail" | "googlecalendar";
 
-/** Hosted authorize URL for connecting a single provider. */
-export async function authorizeUrl(
-  userId: string,
-  provider: Provider,
-  returnTo?: string
-): Promise<string> {
-  const { authorizeUrl } = await tenant(userId).plugins.oauth.authorizeUrl(provider, returnTo);
-  return authorizeUrl;
+/** Shared OAuth redirect target. Must match the URI registered in Google Cloud. */
+export function getRedirectUri(): string {
+  return `${process.env.NEXT_PUBLIC_URL}/api/corsair/callback`;
 }
 
-/** Self-service connect link covering all installed plugins for the tenant. */
-export async function connectLink(userId: string): Promise<string> {
-  const link = await tenant(userId).connectLink.create();
-  return link.url;
+/** Path the browser is sent to when a tenant needs to (re)connect a provider. */
+function signInLinkFor(provider: Provider): string {
+  const base = process.env.NEXT_PUBLIC_URL ?? "";
+  return `${base}/api/corsair/connect?provider=${provider}`;
+}
+
+/** Build the Google OAuth authorize URL for this user + provider. */
+export async function getAuthUrl(userId: string, provider: Provider): Promise<string> {
+  const { url } = await generateOAuthUrl(corsair, provider, {
+    tenantId: userId,
+    redirectUri: getRedirectUri(),
+  });
+  return url;
+}
+
+/** Exchange the OAuth `code`/`state` for tokens and store them for the tenant. */
+export async function completeOAuth(code: string, state: string): Promise<{ plugin: string; tenantId: string }> {
+  return processOAuthCallback(corsair, { code, state, redirectUri: getRedirectUri() });
+}
+
+// Map the SDK's AuthMissingError onto our redirectable CorsairAuthError; let
+// every other error propagate unchanged.
+async function call<T>(provider: Provider, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (e instanceof AuthMissingError) throw new CorsairAuthError(signInLinkFor(provider));
+    throw e;
+  }
 }
 
 // ── Gmail ──────────────────────────────────────────────────────────────────────
-// Operation paths verified against api.corsair.dev/md/integrations/gmail.
-// Inputs follow the native Gmail REST shape; confirm per-op fields at
-// api.corsair.dev/md/integrations/<path> when extending.
 
 export function listMessages(userId: string, input: { maxResults?: number; q?: string; pageToken?: string }) {
-  return tenant(userId).run("gmail.api.messages.list", input).then(unwrap);
+  return call("gmail", () => tenant(userId).gmail.api.messages.list(input));
 }
 
 export function getMessage(userId: string, id: string) {
-  return tenant(userId).run("gmail.api.messages.get", { id, format: "full" }).then(unwrap);
+  return call("gmail", () => tenant(userId).gmail.api.messages.get({ id, format: "full" }));
 }
 
 export function getThread(userId: string, id: string) {
-  return tenant(userId).run("gmail.api.threads.get", { id, format: "full" }).then(unwrap);
+  return call("gmail", () => tenant(userId).gmail.api.threads.get({ id, format: "full" }));
 }
 
 /** Gmail REST message ids are hex strings without dashes (not Corsair DB uuids). */
@@ -71,8 +83,8 @@ export function isGmailApiId(id: string): boolean {
 }
 
 // Recursively find the first hex Gmail id stored under a key matching `keyRe`.
-// Corsair DB rows vary in shape (flat columns vs nested message objects), so we
-// scan a few levels deep instead of assuming fixed top-level keys.
+// Corsair rows vary in shape (flat columns vs nested objects), so we scan a few
+// levels deep instead of assuming fixed top-level keys.
 function deepFindHexByKey(value: unknown, keyRe: RegExp, depth = 0): string | null {
   if (!value || typeof value !== "object" || depth > 3) return null;
   if (Array.isArray(value)) {
@@ -95,20 +107,21 @@ function deepFindHexByKey(value: unknown, keyRe: RegExp, depth = 0): string | nu
   return null;
 }
 
-/** Corsair DB row → Gmail API message id (hex) when present, scanning nested shapes. */
+/** Corsair row → Gmail API message id (hex) when present, scanning nested shapes. */
 export function pickGmailApiMessageId(row: Record<string, unknown>): string | null {
   return deepFindHexByKey(row, /(?:^id$|message.?id|gmail.?id|google.?id|external.?id)/i);
 }
 
-/** Corsair DB row → Gmail thread id (hex) when present, scanning nested shapes. */
+/** Corsair row → Gmail thread id (hex) when present, scanning nested shapes. */
 export function pickGmailThreadId(row: Record<string, unknown>): string | null {
   return deepFindHexByKey(row, /thread.?id/i);
 }
 
 /**
- * Corsair-cached local Gmail search (sub-second, no live Gmail round-trip).
- * The synced DB filters by column with operators (no free-text "query" column),
- * so we match `subject`/`body`/`from` with `contains` and merge unique results.
+ * Local Gmail search over Corsair's synced entities (sub-second, no Gmail
+ * round-trip). The synced `data` JSONB has top-level `subject`/`body`/`from`
+ * columns, so we match each with `contains` and merge unique results. Rows are
+ * flattened (data spread to the top level) so existing callers keep working.
  */
 export async function searchCachedMessages(
   userId: string,
@@ -130,29 +143,29 @@ export async function searchCachedMessages(
   }
 
   const runSearch = async (field: SearchSpec["field"], value: string, strict: boolean) => {
-    const res = await t.run<Array<Record<string, unknown>>>("gmail.db.messages.search", {
-      data: { [field]: { contains: value } },
-      limit,
-    });
-    if (!res.success) {
-      if (strict) throw new CorsairAuthError(res.signInLink);
+    try {
+      return await t.gmail.db.messages.search({ data: { [field]: { contains: value } }, limit });
+    } catch (e) {
+      if (strict && e instanceof AuthMissingError) throw new CorsairAuthError(signInLinkFor("gmail"));
       return [];
     }
-    return res.data ?? [];
   };
 
-  const batches = await Promise.all(
-    specs.map(({ field, value }, i) => runSearch(field, value, i === 0))
-  );
+  const batches = await Promise.all(specs.map(({ field, value }, i) => runSearch(field, value, i === 0)));
 
   const seen = new Set<string>();
   const merged: Array<Record<string, unknown>> = [];
   for (const rows of batches) {
-    for (const row of rows) {
-      const key = typeof row.id === "string" ? row.id : JSON.stringify(row);
+    for (const entity of rows) {
+      const data = (entity.data ?? {}) as Record<string, unknown>;
+      const flat: Record<string, unknown> = {
+        ...data,
+        id: typeof data.id === "string" ? data.id : entity.entity_id,
+      };
+      const key = typeof flat.id === "string" ? flat.id : JSON.stringify(flat);
       if (seen.has(key)) continue;
       seen.add(key);
-      merged.push(row);
+      merged.push(flat);
       if (merged.length >= limit) return merged;
     }
   }
@@ -161,11 +174,11 @@ export async function searchCachedMessages(
 
 /** Send a message. `raw` is an RFC-2822 message, base64url-encoded (Gmail contract). */
 export function sendMessage(userId: string, raw: string, threadId?: string) {
-  return tenant(userId).run("gmail.api.messages.send", { raw, threadId }).then(unwrap);
+  return call("gmail", () => tenant(userId).gmail.api.messages.send({ raw, threadId }));
 }
 
 function modifyMessage(userId: string, id: string, addLabelIds: string[], removeLabelIds: string[]) {
-  return tenant(userId).run("gmail.api.messages.modify", { id, addLabelIds, removeLabelIds }).then(unwrap);
+  return call("gmail", () => tenant(userId).gmail.api.messages.modify({ id, addLabelIds, removeLabelIds }));
 }
 
 export const archiveMessage = (userId: string, id: string) => modifyMessage(userId, id, [], ["INBOX"]);
@@ -176,17 +189,20 @@ export const unstar = (userId: string, id: string) => modifyMessage(userId, id, 
 export const trashMessage = (userId: string, id: string) => modifyMessage(userId, id, ["TRASH"], ["INBOX"]);
 
 // ── Google Calendar ─────────────────────────────────────────────────────────────
-// Operation paths verified against api.corsair.dev/md/integrations/googlecalendar.
 
 export function listEvents(
   userId: string,
   input: { calendarId?: string; timeMin?: string; timeMax?: string; maxResults?: number }
 ) {
-  return tenant(userId).run("googlecalendar.api.events.getMany", { calendarId: "primary", ...input }).then(unwrap);
+  return call("googlecalendar", () =>
+    tenant(userId).googlecalendar.api.events.getMany({ calendarId: "primary", ...input })
+  );
 }
 
 export function getEvent(userId: string, eventId: string, calendarId = "primary") {
-  return tenant(userId).run("googlecalendar.api.events.get", { calendarId, id: eventId }).then(unwrap);
+  return call("googlecalendar", () =>
+    tenant(userId).googlecalendar.api.events.get({ calendarId, id: eventId })
+  );
 }
 
 export type CreateEventInput = {
@@ -202,24 +218,19 @@ export type CreateEventInput = {
 
 export async function createEvent(userId: string, input: CreateEventInput) {
   const { calendarId = "primary", ...event } = input;
-  const runInput = {
-    calendarId,
-    event,
-    // Email invites to all guests (otherwise Google creates the event silently).
-    sendUpdates: "all" as const,
-  };
-  console.log("[corsair:createEvent] request:", JSON.stringify({ userId, ...runInput }));
   try {
-    const res = await tenant(userId).run("googlecalendar.api.events.create", runInput);
-    console.log("[corsair:createEvent] raw response:", JSON.stringify(res));
-    if (!res.success) {
-      console.error("[corsair:createEvent] failed (no success):", res);
-      throw new CorsairAuthError(res.signInLink);
-    }
-    return res.data;
+    // Email invites to all guests (otherwise Google creates the event silently).
+    return await tenant(userId).googlecalendar.api.events.create({
+      calendarId,
+      event,
+      sendUpdates: "all",
+    });
   } catch (e) {
-    if (e instanceof CorsairAuthError) throw e;
-    console.error("[corsair:createEvent] threw:", e instanceof Error ? { message: e.message, stack: e.stack, name: e.name } : e);
+    if (e instanceof AuthMissingError) throw new CorsairAuthError(signInLinkFor("googlecalendar"));
+    console.error(
+      "[corsair:createEvent] threw:",
+      e instanceof Error ? { message: e.message, name: e.name } : e
+    );
     throw e;
   }
 }
@@ -231,18 +242,18 @@ export function updateEvent(
   calendarId = "primary"
 ) {
   const { calendarId: _ignored, ...event } = patch;
-  return tenant(userId)
-    .run("googlecalendar.api.events.update", {
+  return call("googlecalendar", () =>
+    tenant(userId).googlecalendar.api.events.update({
       calendarId,
       id: eventId,
       event,
       sendUpdates: "all",
     })
-    .then(unwrap);
+  );
 }
 
 export function deleteEvent(userId: string, eventId: string, calendarId = "primary") {
-  return tenant(userId)
-    .run("googlecalendar.api.events.delete", { calendarId, id: eventId, sendUpdates: "all" })
-    .then(unwrap);
+  return call("googlecalendar", () =>
+    tenant(userId).googlecalendar.api.events.delete({ calendarId, id: eventId, sendUpdates: "all" })
+  );
 }

@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { authorizeUrl, type Provider } from "@/lib/corsair/client";
+import { getAuthUrl, type Provider } from "@/lib/corsair/client";
 
-// Kicks off the Corsair-hosted OAuth flow for a provider. Corsair sends the user
-// back to /api/corsair/connected once they authorize.
+// Kicks off the Google OAuth flow for a provider. Google sends the user back to
+// /api/corsair/callback (with code+state), which stores the tokens.
 export async function GET(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.redirect(new URL("/login", req.url));
@@ -13,7 +13,6 @@ export async function GET(req: Request) {
     return NextResponse.redirect(new URL("/", req.url));
   }
 
-  const returnTo = new URL(`/api/corsair/connected?provider=${provider}`, req.url).toString();
-  const url = await authorizeUrl(session.user.id, provider, returnTo);
+  const url = await getAuthUrl(session.user.id, provider);
   return NextResponse.redirect(url);
 }

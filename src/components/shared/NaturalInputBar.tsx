@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Sparkles, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -55,9 +55,11 @@ export function NaturalInputBar({
     focused && contactSuggestions.suggestions.length > 0
   );
 
-  useEffect(() => {
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
     if (open) setText("");
-  }, [open]);
+  }
 
   const submit = async () => {
     const trimmed = text.trim();
