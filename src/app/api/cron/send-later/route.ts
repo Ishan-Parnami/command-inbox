@@ -3,6 +3,7 @@ import { and, eq, lte } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { emailDrafts, emailThreads } from "@/lib/db/schema";
 import { sendEmail } from "@/lib/email/send";
+import { isAuthorizedCron } from "@/lib/cron-auth";
 
 // Map the stored internal thread uuid to the Gmail thread id for threading.
 async function gmailThreadId(userId: string, threadId: string | null) {
@@ -14,14 +15,10 @@ async function gmailThreadId(userId: string, threadId: string | null) {
   return t?.gid ?? undefined;
 }
 
-// Fires queued "Send Later" drafts that have come due. Trigger from Vercel Cron
-// (carries x-vercel-cron) or manually with `authorization: Bearer $CRON_SECRET`.
+// Fires queued "Send Later" drafts that have come due. Trigger from Vercel Cron,
+// a Bearer header, or `?token=$CRON_SECRET` (see isAuthorizedCron).
 export async function GET(req: Request) {
-  const authorized =
-    req.headers.get("x-vercel-cron") !== null ||
-    (!!process.env.CRON_SECRET &&
-      req.headers.get("authorization") === `Bearer ${process.env.CRON_SECRET}`);
-  if (!authorized) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!isAuthorizedCron(req)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const due = await db
     .select()

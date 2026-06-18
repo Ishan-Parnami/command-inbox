@@ -1,5 +1,7 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { and, eq } from "drizzle-orm";
+import { processWebhook } from "corsair";
+import { corsair } from "@/corsair";
 import { db } from "@/lib/db";
 import {
   corsairConnections,
@@ -116,11 +118,20 @@ export async function POST(req: Request) {
   }
 
   const userId =
+    new URL(req.url).searchParams.get("tenantId") ??
     pick(payload, ["tenantId", "tenant_id", "userId", "user_id"]) ??
     req.headers.get("x-corsair-tenant-id") ??
     undefined;
   const eventType = granularType(payload) ?? pick(payload, ["type", "event", "event_type"]) ?? "unknown";
   if (!userId) return new Response("OK"); // can't route without a tenant
+
+  // Let the SDK update corsair_entities for the tenant. Best-effort: the custom
+  // mirror below (which the UI reads) is the source of truth, so never fail here.
+  try {
+    await processWebhook(corsair, Object.fromEntries(req.headers), payload, { tenantId: userId });
+  } catch (e) {
+    console.error("[corsair] processWebhook failed:", e);
+  }
 
   const lower = eventType.toLowerCase();
   const source = lower.includes("message") || lower.includes("gmail") ? "gmail" : "gcal";

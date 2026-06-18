@@ -12,9 +12,13 @@ export function useContactSuggestionKeyboard(
   const [highlightIndex, setHighlightIndex] = useState(0);
   const suggestionKey = useMemo(() => suggestions.map((s) => s.email).join("\0"), [suggestions]);
 
-  useEffect(() => {
+  // Reset the highlight when the suggestion set changes (adjust state during
+  // render rather than in an effect, per React guidance).
+  const [prevKey, setPrevKey] = useState(suggestionKey);
+  if (prevKey !== suggestionKey) {
+    setPrevKey(suggestionKey);
     setHighlightIndex(0);
-  }, [suggestionKey]);
+  }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!active || suggestions.length === 0) return false;

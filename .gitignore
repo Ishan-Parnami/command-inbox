@@ -45,5 +45,3 @@ next-env.d.ts
 # claude
 CLAUDE.md
 knowledge-data.*
-
-scripts/

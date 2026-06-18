@@ -6,15 +6,13 @@ import { cn } from "@/lib/utils";
 
 type Props = { gmailConnected: boolean; calendarConnected: boolean };
 
-function ConnectRow({
+function StatusRow({
   icon,
   label,
-  provider,
   connected,
 }: {
   icon: React.ReactNode;
   label: string;
-  provider: string;
   connected: boolean;
 }) {
   return (
@@ -25,16 +23,10 @@ function ConnectRow({
         </div>
         <span className="text-sm font-medium">{label}</span>
       </div>
-      {connected ? (
-        <span className="flex items-center gap-1 text-sm text-muted-foreground">
-          <Check className="size-4 text-primary" />
-          Connected
-        </span>
-      ) : (
-        <a className={cn(buttonVariants({ size: "sm" }))} href={`/api/corsair/connect?provider=${provider}`}>
-          Connect
-        </a>
-      )}
+      <span className="flex items-center gap-1 text-sm text-muted-foreground">
+        <Check className={cn("size-4", connected ? "text-primary" : "text-muted-foreground/40")} />
+        {connected ? "Connected" : "Pending"}
+      </span>
     </div>
   );
 }
@@ -44,26 +36,26 @@ export function ConnectScreen({ gmailConnected, calendarConnected }: Props) {
     <div className="flex flex-1 items-center justify-center px-6 py-16">
       <div className="w-full max-w-md space-y-6">
         <div className="space-y-1.5 text-center">
-          <h2 className="text-lg font-semibold tracking-tight">Connect your accounts</h2>
+          <h2 className="text-lg font-semibold tracking-tight">Connect your account</h2>
           <p className="text-sm text-muted-foreground">
-            Command Inbox reads your Gmail &amp; Calendar through Corsair. Connect Gmail to get
-            started.
+            Command Inbox reads your Gmail &amp; Calendar through Corsair. One sign-in connects both.
           </p>
         </div>
         <div className="space-y-2.5">
-          <ConnectRow
-            icon={<Mail className="size-4" />}
-            label="Gmail"
-            provider="gmail"
-            connected={gmailConnected}
-          />
-          <ConnectRow
+          <StatusRow icon={<Mail className="size-4" />} label="Gmail" connected={gmailConnected} />
+          <StatusRow
             icon={<Calendar className="size-4" />}
             label="Google Calendar"
-            provider="googlecalendar"
             connected={calendarConnected}
           />
         </div>
+        {/* Starts the Gmail consent; the callback chains into Calendar automatically. */}
+        <a
+          className={cn(buttonVariants({ size: "lg" }), "w-full")}
+          href="/api/corsair/connect?provider=gmail"
+        >
+          Connect Google
+        </a>
       </div>
     </div>
   );
