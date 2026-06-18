@@ -5,6 +5,7 @@ import { compare } from "bcryptjs";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
+import { avatarProxyPath, resolveAvatarForStorage } from "@/lib/avatar";
 
 const demoLoginEnabled = process.env.DEMO_LOGIN_ENABLED === "true";
 
@@ -54,7 +55,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           id: row.id,
           email: row.email,
           name: row.name,
-          image: row.avatarUrl,
+          image: avatarProxyPath(row.id),
         };
       },
     }),
@@ -65,19 +66,20 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // sign-in, but that id is not in our users table and must not be used as
       // the Corsair tenant id.
       if (user?.email) {
+        const avatarUrl = await resolveAvatarForStorage(user.image);
         const [row] = await db
           .insert(users)
           .values({
             email: user.email,
             name: user.name ?? profile?.name ?? null,
-            avatarUrl: user.image ?? null,
+            avatarUrl,
             googleId: (profile as { sub?: string } | undefined)?.sub ?? null,
           })
           .onConflictDoUpdate({
             target: users.email,
             set: {
               name: user.name ?? profile?.name ?? null,
-              avatarUrl: user.image ?? null,
+              avatarUrl,
               googleId: (profile as { sub?: string } | undefined)?.sub ?? null,
               updatedAt: new Date(),
             },
@@ -93,7 +95,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return token;
     },
     async session({ session, token }) {
-      if (token.userId) session.user.id = token.userId as string;
+      if (token.userId) {
+        session.user.id = token.userId as string;
+        session.user.image = avatarProxyPath(token.userId as string);
+      }
       return session;
     },
   },

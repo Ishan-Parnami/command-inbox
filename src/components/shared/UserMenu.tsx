@@ -2,7 +2,7 @@
 
 import { useSession, signOut } from "next-auth/react";
 import { LogOut } from "lucide-react";
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { UserAvatar } from "@/components/shared/UserAvatar";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -15,7 +15,6 @@ import { UsageMeter } from "@/components/shared/UsageMeter";
 export function UserMenu() {
   const { data } = useSession();
   const user = data?.user;
-  const initials = (user?.name ?? user?.email ?? "?").trim().charAt(0).toUpperCase();
 
   return (
     <DropdownMenu>
@@ -23,10 +22,7 @@ export function UserMenu() {
         aria-label="Account menu"
         className="rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <Avatar size="sm">
-          {user?.image ? <AvatarImage src={user.image} alt={user?.name ?? "You"} /> : null}
-          <AvatarFallback>{initials}</AvatarFallback>
-        </Avatar>
+        <UserAvatar src={user?.image} name={user?.name} email={user?.email} size="sm" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <div className="px-1.5 py-1">
