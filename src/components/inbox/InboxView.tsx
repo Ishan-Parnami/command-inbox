@@ -137,13 +137,13 @@ function MessageBody({ message }: { message: Message }) {
     const clean = DOMPurify.sanitize(message.bodyHtml, { USE_PROFILES: { html: true } });
     return (
       <div
-        className="overflow-x-auto rounded-md bg-card p-4 text-sm leading-relaxed text-card-foreground [&_a]:text-blue-600 [&_a]:underline"
+        className="overflow-x-auto rounded-md p-4 text-sm leading-relaxed bg-white text-slate-900 [&_a]:text-blue-600 [&_a]:underline dark:bg-white dark:text-slate-900"
         dangerouslySetInnerHTML={{ __html: clean }}
       />
     );
   }
   return (
-    <p className="text-sm whitespace-pre-wrap text-foreground/90">
+    <p className="text-sm whitespace-pre-wrap text-slate-900 dark:text-slate-900">
       {message.bodyText ?? "(no content)"}
     </p>
   );
@@ -665,26 +665,26 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
           </div>
         )}
 
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto bg-[#f3f3f7]">
           {!selectedId ? (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
               No email to read
             </div>
           ) : isLoading ? (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading…</div>
+            <div className="flex h-full items-center justify-center text-sm text-slate-600 dark:text-slate-600">Loading…</div>
           ) : (
             <div className="mx-auto max-w-3xl space-y-6 px-6 py-6">
-              <h1 className="text-lg font-semibold tracking-tight">
+              <h1 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-900">
                 {data?.messages[0]?.subject ?? "(no subject)"}
               </h1>
               {data?.messages.map((m) => (
                 <div key={m.id} className="space-y-3 border-t pt-4 first:border-t-0 first:pt-0">
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{m.fromName ?? m.fromEmail}</p>
-                      {m.fromName && <p className="truncate text-xs text-muted-foreground">{m.fromEmail}</p>}
+                      <p className="truncate text-sm font-medium text-slate-900 dark:text-slate-900">{m.fromName ?? m.fromEmail}</p>
+                      {m.fromName && <p className="truncate text-xs text-slate-600 dark:text-slate-600">{m.fromEmail}</p>}
                     </div>
-                    <span className="shrink-0 text-xs text-muted-foreground">
+                    <span className="shrink-0 text-xs text-slate-600 dark:text-slate-600">
                       {m.receivedAt ? format(new Date(m.receivedAt), "MMM d, h:mm a") : ""}
                     </span>
                   </div>
