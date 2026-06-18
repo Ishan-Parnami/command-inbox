@@ -19,7 +19,7 @@ export default async function InboxPage({
 }: {
   searchParams: Promise<{ scope_error?: string; connect_error?: string }>;
 }) {
-  const { scope_error: scopeError } = await searchParams;
+  const { scope_error: scopeError, connect_error: connectError } = await searchParams;
   const session = await auth();
   if (!session?.user) return <LandingPage />;
   const userId = session.user.id;
@@ -61,15 +61,21 @@ export default async function InboxPage({
       {scopeError && (
         <div className="flex items-center justify-between gap-3 border-b bg-destructive/10 px-4 py-2 text-sm">
           <span className="text-destructive">
-            {scopeError === "gmail" ? "Gmail" : "Calendar"} connected with limited permissions.
-            Reading your data needs full access — please reconnect and allow all.
+            Please provide required access to connect{" "}
+            {scopeError === "gmail" ? "Gmail" : "Google Calendar"}.
           </span>
           <a
             className={cn(buttonVariants({ size: "sm" }))}
             href={`/api/corsair/connect?provider=${scopeError}`}
           >
-            Reconnect
+            Try again
           </a>
+        </div>
+      )}
+
+      {connectError && !scopeError && (
+        <div className="border-b bg-destructive/10 px-4 py-2 text-sm text-destructive">
+          Connection failed. Please try again.
         </div>
       )}
 

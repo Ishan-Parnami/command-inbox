@@ -42,16 +42,14 @@ export default async function LoginPage() {
                   <span className="bg-background px-2 text-muted-foreground">or</span>
                 </div>
               </div>
-              <GoogleSignInButton disabled />
+              <GoogleSignInButton />
             </div>
           ) : (
             <GoogleSignInButton />
           )}
 
           <p className="text-center text-xs text-muted-foreground">
-            {demoLoginEnabled
-              ? "Use the demo email and password provided to you. Gmail and Calendar are already connected for this account."
-              : "You'll connect Gmail and Calendar in the next step."}
+            You&apos;ll connect Gmail and Calendar in the next step.
           </p>
         </div>
       </main>

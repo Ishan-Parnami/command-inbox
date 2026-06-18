@@ -27,6 +27,22 @@ export class CorsairAuthError extends Error {
 // ── OAuth / connection ────────────────────────────────────────────────────────
 export type Provider = "gmail" | "googlecalendar";
 
+/** Scopes Corsair requests per plugin — all must be granted or the connect fails. */
+export const REQUIRED_SCOPES: Record<Provider, readonly string[]> = {
+  gmail: [
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/gmail.labels",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.compose",
+  ],
+  googlecalendar: ["https://www.googleapis.com/auth/calendar"],
+};
+
+export function hasRequiredScopes(scopeParam: string | null, provider: Provider): boolean {
+  const granted = new Set((scopeParam ?? "").split(/\s+/).filter(Boolean));
+  return REQUIRED_SCOPES[provider].every((s) => granted.has(s));
+}
+
 /** Shared OAuth redirect target. Must match the URI registered in Google Cloud. */
 export function getRedirectUri(): string {
   return `${process.env.NEXT_PUBLIC_URL}/api/corsair/callback`;
@@ -49,10 +65,10 @@ export async function getAuthUrl(
     redirectUri: getRedirectUri(),
   });
   // Corsair OAuth is separate from NextAuth — Google may reuse whatever account
-  // is signed into the browser. Force the account picker and nudge the email
-  // the user logged in with.
+  // is signed into the browser. Keep `consent` so Google returns a refresh token
+  // (required by the Corsair plugins) and add `select_account` for the picker.
   const auth = new URL(url);
-  auth.searchParams.set("prompt", "select_account");
+  auth.searchParams.set("prompt", "consent select_account");
   if (loginHint) auth.searchParams.set("login_hint", loginHint);
   return auth.toString();
 }
@@ -60,6 +76,21 @@ export async function getAuthUrl(
 /** Exchange the OAuth `code`/`state` for tokens and store them for the tenant. */
 export async function completeOAuth(code: string, state: string): Promise<{ plugin: string; tenantId: string }> {
   return processOAuthCallback(corsair, { code, state, redirectUri: getRedirectUri() });
+}
+
+/** True when Corsair can read credentials for this tenant (refresh token present). */
+export async function verifyProviderAuth(userId: string, provider: Provider): Promise<boolean> {
+  try {
+    const t = tenant(userId);
+    if (provider === "gmail") {
+      await t.gmail.api.messages.list({ maxResults: 1 });
+    } else {
+      await t.googlecalendar.api.events.getMany({ calendarId: "primary", maxResults: 1 });
+    }
+    return true;
+  } catch (e) {
+    return !(e instanceof AuthMissingError);
+  }
 }
 
 // Map the SDK's AuthMissingError onto our redirectable CorsairAuthError; let

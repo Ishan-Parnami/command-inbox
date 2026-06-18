@@ -17,15 +17,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   session: { strategy: "jwt" },
   pages: { signIn: "/login" },
   providers: [
-    ...(demoLoginEnabled
-      ? []
-      : [
-          Google({
-            clientId: process.env.AUTH_GOOGLE_ID ?? process.env.GOOGLE_CLIENT_ID,
-            clientSecret: process.env.AUTH_GOOGLE_SECRET ?? process.env.GOOGLE_CLIENT_SECRET,
-            authorization: { params: { scope: "openid email profile" } },
-          }),
-        ]),
+    Google({
+      clientId: process.env.AUTH_GOOGLE_ID ?? process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.AUTH_GOOGLE_SECRET ?? process.env.GOOGLE_CLIENT_SECRET,
+      authorization: { params: { scope: "openid email profile" } },
+    }),
     Credentials({
       id: "credentials",
       name: "Demo login",
@@ -65,11 +61,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ],
   callbacks: {
     async jwt({ token, user, profile }) {
-      if (user?.id) {
-        token.userId = user.id;
-        return token;
-      }
-
+      // Always resolve to our DB users.id — Auth.js also sets user.id on OAuth
+      // sign-in, but that id is not in our users table and must not be used as
+      // the Corsair tenant id.
       if (user?.email) {
         const [row] = await db
           .insert(users)
@@ -82,13 +76,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           .onConflictDoUpdate({
             target: users.email,
             set: {
-              name: user.name ?? null,
+              name: user.name ?? profile?.name ?? null,
               avatarUrl: user.image ?? null,
+              googleId: (profile as { sub?: string } | undefined)?.sub ?? null,
               updatedAt: new Date(),
             },
           })
           .returning({ id: users.id });
         token.userId = row.id;
+        return token;
+      }
+
+      if (user?.id) {
+        token.userId = user.id;
       }
       return token;
     },
