@@ -1,9 +1,8 @@
 import { redirect } from "next/navigation";
 import { Command } from "lucide-react";
 import { auth } from "@/auth";
-import { GoogleSignInButton } from "@/components/shared/GoogleSignInButton";
-import { ThemeToggle } from "@/components/shared/ThemeToggle";
 import { LoginForm } from "@/components/shared/LoginForm";
+import { ThemeToggle } from "@/components/shared/ThemeToggle";
 
 export default async function LoginPage() {
   const session = await auth();
@@ -31,27 +30,7 @@ export default async function LoginPage() {
             </div>
           </div>
 
-          {demoLoginEnabled ? (
-            <div className="space-y-6">
-              <div className="rounded-xl border bg-card p-5 shadow-sm">
-                <div className="mb-5 space-y-1">
-                  <h2 className="text-sm font-semibold tracking-tight">Email sign-in</h2>
-                </div>
-                <LoginForm />
-              </div>
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                  <span className="w-full border-t" />
-                </div>
-                <div className="relative flex justify-center text-xs uppercase tracking-wide">
-                  <span className="bg-background px-3 text-muted-foreground">or</span>
-                </div>
-              </div>
-              <GoogleSignInButton />
-            </div>
-          ) : (
-            <GoogleSignInButton />
-          )}
+          <LoginForm showEmailForm={demoLoginEnabled} />
 
           <p className="text-center text-xs leading-relaxed text-muted-foreground">
             {demoLoginEnabled

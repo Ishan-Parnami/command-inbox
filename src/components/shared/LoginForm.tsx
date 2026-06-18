@@ -1,21 +1,56 @@
 "use client";
 
 import { useState } from "react";
+import { flushSync } from "react-dom";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { AlertCircle, Eye, EyeOff, Loader2, LogIn, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { GoogleSignInButton } from "@/components/shared/GoogleSignInButton";
 import { cn } from "@/lib/utils";
 
+export function LoginForm({ showEmailForm }: { showEmailForm: boolean }) {
+  const [emailLoading, setEmailLoading] = useState(false);
+
+  if (!showEmailForm) {
+    return <GoogleSignInButton disabled={emailLoading} />;
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-xl border bg-card p-5 shadow-sm">
+        <div className="mb-5 space-y-1">
+          <h2 className="text-sm font-semibold tracking-tight">Email sign-in</h2>
+        </div>
+        <EmailSignInForm onLoadingChange={setEmailLoading} />
+      </div>
+      <div className="relative">
+        <div className="absolute inset-0 flex items-center">
+          <span className="w-full border-t" />
+        </div>
+        <div className="relative flex justify-center text-xs uppercase tracking-wide">
+          <span className="bg-background px-3 text-muted-foreground">or</span>
+        </div>
+      </div>
+      <GoogleSignInButton disabled={emailLoading} />
+    </div>
+  );
+}
+
 /** Email/password login for existing users with a demo password (no Google OAuth). */
-export function LoginForm() {
+function EmailSignInForm({ onLoadingChange }: { onLoadingChange?: (loading: boolean) => void }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  const setLoadingState = (next: boolean) => {
+    setLoading(next);
+    onLoadingChange?.(next);
+  };
 
   const canSubmit = email.trim().length > 0 && password.length > 0;
 
@@ -26,29 +61,36 @@ export function LoginForm() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit || loading) return;
-    setError(null);
-    setLoading(true);
+    flushSync(() => {
+      setError(null);
+      setLoadingState(true);
+    });
     try {
       const res = await signIn("credentials", {
         email: email.trim().toLowerCase(),
         password,
         redirect: false,
       });
-      if (res?.error) {
+      if (!res || res.error) {
         setError("Invalid email or password.");
+        setLoadingState(false);
         return;
       }
       router.push("/");
       router.refresh();
     } catch {
       setError("Something went wrong. Please try again.");
-    } finally {
-      setLoading(false);
+      setLoadingState(false);
     }
   };
 
   return (
-    <form onSubmit={(e) => void submit(e)} className="space-y-4" noValidate>
+    <form
+      onSubmit={(e) => void submit(e)}
+      className={cn("space-y-4", loading && "pointer-events-none")}
+      noValidate
+      aria-busy={loading}
+    >
       <div className="space-y-1.5">
         <label htmlFor="login-email" className="text-sm font-medium">
           Email
@@ -124,16 +166,22 @@ export function LoginForm() {
         </div>
       )}
 
-      <Button type="submit" size="lg" className="h-10 w-full" disabled={loading || !canSubmit}>
+      <Button
+        type="submit"
+        size="lg"
+        className="h-10 w-full"
+        disabled={loading || !canSubmit}
+        aria-disabled={loading || !canSubmit}
+      >
         {loading ? (
           <>
-            <Loader2 className="size-4 animate-spin" />
-            Signing in…
+            <Loader2 className="size-4 animate-spin" aria-hidden />
+            <span>Signing in…</span>
           </>
         ) : (
           <>
-            <LogIn className="size-4" />
-            Sign in
+            <LogIn className="size-4" aria-hidden />
+            <span>Sign in</span>
           </>
         )}
       </Button>

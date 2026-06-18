@@ -246,10 +246,10 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
           t.id !== v.threadId
             ? t
             : {
-                ...t,
-                isStarred: v.action === "star" ? true : v.action === "unstar" ? false : t.isStarred,
-                isRead: v.action === "read" ? true : v.action === "unread" ? false : t.isRead,
-              }
+              ...t,
+              isStarred: v.action === "star" ? true : v.action === "unstar" ? false : t.isStarred,
+              isRead: v.action === "read" ? true : v.action === "unread" ? false : t.isRead,
+            }
         );
       });
       return { prev };
@@ -538,15 +538,15 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
                 {counts[tb.id] > 0 && <span className="ml-1 text-muted-foreground">{counts[tb.id]}</span>}
               </button>
             ))}
-            <button
+          <button
             title={collapsed ? "Expand" : "Collapse"}
             onClick={() => setCollapsed((c) => !c)}
             className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground ml-auto"
           >
             <svg className="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               {collapsed
-                ? <><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></>
-                : <><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></>
+                ? <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /><path d="m14 9 3 3-3 3" /></>
+                : <><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /><path d="m16 15-3-3 3-3" /></>
               }
             </svg>
           </button>
@@ -617,60 +617,58 @@ export function InboxView({ initialThreads }: { initialThreads: ThreadListItem[]
 
       {/* Reading pane */}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="flex shrink-0 items-center gap-0.5 border-b px-2 py-1.5">
-          {selected && (
-            <>
-              <Button variant="ghost" size="icon-sm" title="Reply (R)" onClick={() => startReplyOrForward("reply")}>
-                <Reply className="size-4" />
-              </Button>
-              <Button variant="ghost" size="icon-sm" title="Forward (F)" onClick={() => startReplyOrForward("forward")}>
-                <Forward className="size-4" />
-              </Button>
-              <span className="mx-1 h-4 w-px bg-border" />
-              <Button variant="ghost" size="icon-sm" title="Archive (E)" onClick={() => undoableAct("archive")}>
-                <Archive className="size-4" />
-              </Button>
-              <Button variant="ghost" size="icon-sm" title="Star (S)" onClick={toggleStar}>
-                <Star className={cn("size-4", selected.isStarred && "fill-primary text-primary")} />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                title={selected.isRead ? "Mark unread (U)" : "Mark read (U)"}
-                onClick={toggleRead}
+        {selected && (
+          <div className="flex shrink-0 items-center gap-0.5 border-b px-2 py-1.5">
+            <Button variant="ghost" size="icon-sm" title="Reply (R)" onClick={() => startReplyOrForward("reply")}>
+              <Reply className="size-4" />
+            </Button>
+            <Button variant="ghost" size="icon-sm" title="Forward (F)" onClick={() => startReplyOrForward("forward")}>
+              <Forward className="size-4" />
+            </Button>
+            <span className="mx-1 h-4 w-px bg-border" />
+            <Button variant="ghost" size="icon-sm" title="Archive (E)" onClick={() => undoableAct("archive")}>
+              <Archive className="size-4" />
+            </Button>
+            <Button variant="ghost" size="icon-sm" title="Star (S)" onClick={toggleStar}>
+              <Star className={cn("size-4", selected.isStarred && "fill-primary text-primary")} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              title={selected.isRead ? "Mark unread (U)" : "Mark read (U)"}
+              onClick={toggleRead}
+            >
+              {selected.isRead ? <MailOpen className="size-4" /> : <Mail className="size-4" />}
+            </Button>
+            <DropdownMenu open={snoozeOpen} onOpenChange={setSnoozeOpen}>
+              <DropdownMenuTrigger
+                title="Snooze (H)"
+                className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }))}
               >
-                {selected.isRead ? <MailOpen className="size-4" /> : <Mail className="size-4" />}
-              </Button>
-              <DropdownMenu open={snoozeOpen} onOpenChange={setSnoozeOpen}>
-                <DropdownMenuTrigger
-                  title="Snooze (H)"
-                  className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }))}
-                >
-                  <Clock className="size-4" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="w-40">
-                  {SNOOZE_PRESETS.map((p) => (
-                    <DropdownMenuItem key={p.label} onClick={() => doSnooze(p.ms)}>
-                      {p.label}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Button variant="ghost" size="icon-sm" title="Trash (#)" onClick={() => undoableAct("trash")}>
-                <Trash2 className="size-4" />
-              </Button>
-              <span className="mx-1 h-4 w-px bg-border" />
-              <Button variant="ghost" size="icon-sm" title="Email → Calendar (T)" onClick={emailToCalendar}>
-                <CalendarDays className="size-4" />
-              </Button>
-            </>
-          )}
-        </div>
+                <Clock className="size-4" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-40">
+                {SNOOZE_PRESETS.map((p) => (
+                  <DropdownMenuItem key={p.label} onClick={() => doSnooze(p.ms)}>
+                    {p.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button variant="ghost" size="icon-sm" title="Trash (#)" onClick={() => undoableAct("trash")}>
+              <Trash2 className="size-4" />
+            </Button>
+            <span className="mx-1 h-4 w-px bg-border" />
+            <Button variant="ghost" size="icon-sm" title="Email → Calendar (T)" onClick={emailToCalendar}>
+              <CalendarDays className="size-4" />
+            </Button>
+          </div>
+        )}
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           {!selectedId ? (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              Select an email to read
+              No email to read
             </div>
           ) : isLoading ? (
             <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading…</div>

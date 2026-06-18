@@ -28,6 +28,14 @@ export function GoogleSignInButton({
 
   if (!disabled) return button;
 
+  if (!disabledReason) {
+    return (
+      <span className="inline-flex w-full cursor-not-allowed">
+        {button}
+      </span>
+    );
+  }
+
   return (
     <TooltipProvider>
       <Tooltip>
