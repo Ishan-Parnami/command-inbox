@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
+import { after } from "next/server";
 import { decodeOAuthState } from "corsair/oauth";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { corsairConnections, users } from "@/lib/db/schema";
-import { completeOAuth, hasRequiredScopes, verifyProviderAuth, type Provider } from "@/lib/corsair/client";
+import { completeOAuth, hasRequiredScopes, type Provider } from "@/lib/corsair/client";
 import { syncGmail } from "@/lib/sync/gmail";
 import { syncCalendar } from "@/lib/sync/calendar";
 
@@ -18,9 +19,6 @@ function parseOAuthState(state: string | null) {
   return decodeOAuthState(state, { maxAgeMs: OAUTH_STATE_MAX_AGE_MS });
 }
 
-// Google redirects here after the user authorizes. We exchange the code for
-// tokens (stored per tenant by Corsair), record the connection, and kick off an
-// initial backfill so data is visible without a manual sync.
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
@@ -68,10 +66,6 @@ export async function GET(req: Request) {
     return NextResponse.redirect(new URL("/?connect_error=1", req.url));
   }
 
-  if (!(await verifyProviderAuth(userId, provider))) {
-    return scopeErrorRedirect(req, provider);
-  }
-
   try {
     await db
       .insert(corsairConnections)
@@ -85,23 +79,24 @@ export async function GET(req: Request) {
     return NextResponse.redirect(new URL("/?connect_error=1", req.url));
   }
 
-  // Backfill the local mirror immediately so data shows up without manual Sync.
-  try {
-    if (provider === "gmail") await syncGmail(userId, 30);
-    else await syncCalendar(userId, email);
-  } catch (e) {
-    console.error(`[corsair] ${provider} initial sync failed:`, e);
-  }
+  after(async () => {
+    try {
+      if (provider === "gmail") await syncGmail(userId, 10);
+      else await syncCalendar(userId, email);
+    } catch (e) {
+      console.error(`[corsair] ${provider} initial sync failed:`, e);
+    }
+  });
 
   // One "Connect Google" action: after Calendar, chain into Gmail if not connected yet.
   if (provider === "googlecalendar") {
-    const [gmail] = await db
+    const [gmailConn] = await db
       .select({ userId: corsairConnections.userId })
       .from(corsairConnections)
       .where(
         and(eq(corsairConnections.userId, userId), eq(corsairConnections.provider, "gmail"))
       );
-    if (!gmail) {
+    if (!gmailConn) {
       return NextResponse.redirect(new URL("/api/corsair/connect?provider=gmail", req.url));
     }
   }

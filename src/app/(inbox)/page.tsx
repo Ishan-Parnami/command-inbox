@@ -1,6 +1,6 @@
 import { Command } from "lucide-react";
 import { auth } from "@/auth";
-import { verifyProviderAuth } from "@/lib/corsair/client";
+import { hasCorsairAccount } from "@/lib/corsair/client";
 import { getInboxThreads } from "@/lib/inbox";
 import { ThemeToggle } from "@/components/shared/ThemeToggle";
 import { UserMenu } from "@/components/shared/UserMenu";
@@ -23,8 +23,8 @@ export default async function InboxPage({
   const userId = session.user.id;
 
   const [gmailConnected, calendarConnected] = await Promise.all([
-    verifyProviderAuth(userId, "gmail"),
-    verifyProviderAuth(userId, "googlecalendar"),
+    hasCorsairAccount(userId, "gmail"),
+    hasCorsairAccount(userId, "googlecalendar"),
   ]);
 
   const threadItems = gmailConnected ? await getInboxThreads(userId) : [];
