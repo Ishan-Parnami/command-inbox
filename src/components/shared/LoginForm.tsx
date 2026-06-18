@@ -10,12 +10,8 @@ import { Input } from "@/components/ui/input";
 import { GoogleSignInButton } from "@/components/shared/GoogleSignInButton";
 import { cn } from "@/lib/utils";
 
-export function LoginForm({ showEmailForm }: { showEmailForm: boolean }) {
+export function LoginForm() {
   const [emailLoading, setEmailLoading] = useState(false);
-
-  if (!showEmailForm) {
-    return <GoogleSignInButton disabled={emailLoading} />;
-  }
 
   return (
     <div className="space-y-6">
@@ -38,7 +34,7 @@ export function LoginForm({ showEmailForm }: { showEmailForm: boolean }) {
   );
 }
 
-/** Email/password login for existing users with a demo password (no Google OAuth). */
+/** Email/password login for users who have set a password on their account. */
 function EmailSignInForm({ onLoadingChange }: { onLoadingChange?: (loading: boolean) => void }) {
   const router = useRouter();
   const [email, setEmail] = useState("");

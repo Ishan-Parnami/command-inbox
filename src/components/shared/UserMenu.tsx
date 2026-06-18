@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { useSession, signOut } from "next-auth/react";
-import { LogOut } from "lucide-react";
+import { KeyRound, LogOut } from "lucide-react";
 import { UserAvatar } from "@/components/shared/UserAvatar";
+import { SetPasswordDialog } from "@/components/shared/SetPasswordDialog";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -15,8 +17,10 @@ import { UsageMeter } from "@/components/shared/UsageMeter";
 export function UserMenu() {
   const { data } = useSession();
   const user = data?.user;
+  const [passwordOpen, setPasswordOpen] = useState(false);
 
   return (
+    <>
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label="Account menu"
@@ -32,11 +36,17 @@ export function UserMenu() {
         <DropdownMenuSeparator />
         <UsageMeter />
         <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => setPasswordOpen(true)}>
+          <KeyRound />
+          Password
+        </DropdownMenuItem>
         <DropdownMenuItem variant="destructive" onClick={() => signOut({ callbackUrl: "/" })}>
           <LogOut />
           Sign out
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+    <SetPasswordDialog open={passwordOpen} onOpenChange={setPasswordOpen} />
+    </>
   );
 }

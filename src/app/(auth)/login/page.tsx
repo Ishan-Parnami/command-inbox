@@ -8,8 +8,6 @@ export default async function LoginPage() {
   const session = await auth();
   if (session?.user) redirect("/");
 
-  const demoLoginEnabled = process.env.DEMO_LOGIN_ENABLED === "true";
-
   return (
     <div className="flex flex-1 flex-col">
       <header className="flex items-center justify-end p-4">
@@ -30,12 +28,11 @@ export default async function LoginPage() {
             </div>
           </div>
 
-          <LoginForm showEmailForm={demoLoginEnabled} />
+          <LoginForm />
 
           <p className="text-center text-xs leading-relaxed text-muted-foreground">
-            {demoLoginEnabled
-              ? "After signing in, connect Gmail and Calendar from the app."
-              : "You'll connect Gmail and Calendar in the next step."}
+            Sign in with Google, or use email/password if you&apos;ve set one on your account.
+            After signing in, connect Gmail and Calendar from the app.
           </p>
         </div>
       </main>

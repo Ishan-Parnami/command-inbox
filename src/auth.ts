@@ -7,8 +7,6 @@ import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { avatarProxyPath, resolveAvatarForStorage } from "@/lib/avatar";
 
-const demoLoginEnabled = process.env.DEMO_LOGIN_ENABLED === "true";
-
 // Auth.js v5 — Google sign-in with JWT sessions (no DB adapter, so our custom
 // `users` table stays intact). On sign-in we upsert the user by email and stamp
 // `users.id` onto the token; that id IS the Corsair tenant id used everywhere.
@@ -25,14 +23,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     }),
     Credentials({
       id: "credentials",
-      name: "Demo login",
+      name: "Email",
       credentials: {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
       async authorize(credentials) {
-        if (!demoLoginEnabled) return null;
-
         const email = credentials?.email?.toString().trim().toLowerCase();
         const password = credentials?.password?.toString();
         if (!email || !password) return null;
