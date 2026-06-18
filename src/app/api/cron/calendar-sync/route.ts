@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { corsairConnections } from "@/lib/db/schema";
+import { CorsairAuthError, verifyProviderAuth } from "@/lib/corsair/client";
 import { syncCalendar } from "@/lib/sync/calendar";
 import { isAuthorizedCron } from "@/lib/cron-auth";
 
@@ -16,14 +17,23 @@ export async function GET(req: Request) {
 
   let synced = 0;
   let events = 0;
+  let skippedAuth = 0;
   for (const conn of conns) {
+    if (!(await verifyProviderAuth(conn.userId, "googlecalendar"))) {
+      skippedAuth++;
+      continue;
+    }
     try {
       events += await syncCalendar(conn.userId, conn.email);
       synced++;
     } catch (e) {
+      if (e instanceof CorsairAuthError) {
+        skippedAuth++;
+        continue;
+      }
       console.error(`[cron/calendar-sync] user ${conn.userId}:`, e);
     }
   }
 
-  return NextResponse.json({ users: conns.length, synced, events });
+  return NextResponse.json({ users: conns.length, synced, skippedAuth, events });
 }

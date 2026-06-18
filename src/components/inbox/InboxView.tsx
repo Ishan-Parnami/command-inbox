@@ -137,7 +137,7 @@ function MessageBody({ message }: { message: Message }) {
     const clean = DOMPurify.sanitize(message.bodyHtml, { USE_PROFILES: { html: true } });
     return (
       <div
-        className="overflow-x-auto rounded-md bg-white p-4 text-sm leading-relaxed text-neutral-900 [&_a]:text-blue-600 [&_a]:underline"
+        className="overflow-x-auto rounded-md bg-card p-4 text-sm leading-relaxed text-card-foreground [&_a]:text-blue-600 [&_a]:underline"
         dangerouslySetInnerHTML={{ __html: clean }}
       />
     );

@@ -33,13 +33,18 @@ export default async function LoginPage() {
 
           {demoLoginEnabled ? (
             <div className="space-y-6">
-              <LoginForm />
+              <div className="rounded-xl border bg-card p-5 shadow-sm">
+                <div className="mb-5 space-y-1">
+                  <h2 className="text-sm font-semibold tracking-tight">Email sign-in</h2>
+                </div>
+                <LoginForm />
+              </div>
               <div className="relative">
                 <div className="absolute inset-0 flex items-center">
                   <span className="w-full border-t" />
                 </div>
-                <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-background px-2 text-muted-foreground">or</span>
+                <div className="relative flex justify-center text-xs uppercase tracking-wide">
+                  <span className="bg-background px-3 text-muted-foreground">or</span>
                 </div>
               </div>
               <GoogleSignInButton />
@@ -48,8 +53,10 @@ export default async function LoginPage() {
             <GoogleSignInButton />
           )}
 
-          <p className="text-center text-xs text-muted-foreground">
-            You&apos;ll connect Gmail and Calendar in the next step.
+          <p className="text-center text-xs leading-relaxed text-muted-foreground">
+            {demoLoginEnabled
+              ? "After signing in, connect Gmail and Calendar from the app."
+              : "You'll connect Gmail and Calendar in the next step."}
           </p>
         </div>
       </main>
