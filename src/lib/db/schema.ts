@@ -37,6 +37,7 @@ export const users = pgTable("users", {
   googleId: varchar("google_id", { length: 255 }).unique(),
   name: varchar("name", { length: 255 }),
   avatarUrl: text("avatar_url"),
+  passwordHash: text("password_hash"),
   preferences: jsonb("preferences")
     .$type<{
       theme: "dark" | "light";
