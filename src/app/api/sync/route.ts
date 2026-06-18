@@ -6,7 +6,7 @@ import { corsairConnections } from "@/lib/db/schema";
 import { syncGmail } from "@/lib/sync/gmail";
 import { syncCalendar } from "@/lib/sync/calendar";
 import { classifyUnclassified } from "@/lib/llm/classify";
-import { CorsairAuthError } from "@/lib/corsair/client";
+import { CorsairAuthError, verifyProviderAuth } from "@/lib/corsair/client";
 
 // Pulls recent Gmail + Calendar data into the local mirror for whichever
 // providers the user has connected.
@@ -21,8 +21,10 @@ export async function POST() {
     .where(eq(corsairConnections.userId, userId));
 
   const result: { emails?: number; events?: number; classified?: number } = {};
-  const gmail = conns.some((c) => c.provider === "gmail");
-  const cal = conns.find((c) => c.provider === "googlecalendar");
+  const gmail = await verifyProviderAuth(userId, "gmail");
+  const cal = (await verifyProviderAuth(userId, "googlecalendar"))
+    ? conns.find((c) => c.provider === "googlecalendar")
+    : undefined;
   try {
     const [gmailResult, eventCount] = await Promise.all([
       gmail ? syncGmail(userId) : Promise.resolve(null),

@@ -42,17 +42,21 @@ export function ConnectScreen({ gmailConnected, calendarConnected }: Props) {
           </p>
         </div>
         <div className="space-y-2.5">
-          <StatusRow icon={<Mail className="size-4" />} label="Gmail" connected={gmailConnected} />
           <StatusRow
             icon={<Calendar className="size-4" />}
             label="Google Calendar"
             connected={calendarConnected}
           />
+          <StatusRow icon={<Mail className="size-4" />} label="Gmail" connected={gmailConnected} />
         </div>
-        {/* Starts the Gmail consent; the callback chains into Calendar automatically. */}
+        {/* Calendar first; the callback chains into Gmail automatically. */}
         <a
           className={cn(buttonVariants({ size: "lg" }), "w-full")}
-          href="/api/corsair/connect?provider=gmail"
+          href={
+            calendarConnected
+              ? "/api/corsair/connect?provider=gmail"
+              : "/api/corsair/connect?provider=googlecalendar"
+          }
         >
           Connect Google
         </a>

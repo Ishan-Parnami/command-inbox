@@ -93,20 +93,16 @@ export async function GET(req: Request) {
     console.error(`[corsair] ${provider} initial sync failed:`, e);
   }
 
-  // One "Connect Google" action: after Gmail, chain straight into the Calendar
-  // consent if it isn't connected yet (each provider is a separate OAuth flow).
-  if (provider === "gmail") {
-    const [cal] = await db
+  // One "Connect Google" action: after Calendar, chain into Gmail if not connected yet.
+  if (provider === "googlecalendar") {
+    const [gmail] = await db
       .select({ userId: corsairConnections.userId })
       .from(corsairConnections)
       .where(
-        and(
-          eq(corsairConnections.userId, userId),
-          eq(corsairConnections.provider, "googlecalendar")
-        )
+        and(eq(corsairConnections.userId, userId), eq(corsairConnections.provider, "gmail"))
       );
-    if (!cal) {
-      return NextResponse.redirect(new URL("/api/corsair/connect?provider=googlecalendar", req.url));
+    if (!gmail) {
+      return NextResponse.redirect(new URL("/api/corsair/connect?provider=gmail", req.url));
     }
   }
 

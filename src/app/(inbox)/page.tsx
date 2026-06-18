@@ -1,8 +1,6 @@
-import { eq } from "drizzle-orm";
-import { Command, Calendar } from "lucide-react";
+import { Command } from "lucide-react";
 import { auth } from "@/auth";
-import { db } from "@/lib/db";
-import { corsairConnections } from "@/lib/db/schema";
+import { verifyProviderAuth } from "@/lib/corsair/client";
 import { getInboxThreads } from "@/lib/inbox";
 import { ThemeToggle } from "@/components/shared/ThemeToggle";
 import { UserMenu } from "@/components/shared/UserMenu";
@@ -24,12 +22,10 @@ export default async function InboxPage({
   if (!session?.user) return <LandingPage />;
   const userId = session.user.id;
 
-  const conns = await db
-    .select()
-    .from(corsairConnections)
-    .where(eq(corsairConnections.userId, userId));
-  const gmailConnected = conns.some((c) => c.provider === "gmail");
-  const calendarConnected = conns.some((c) => c.provider === "googlecalendar");
+  const [gmailConnected, calendarConnected] = await Promise.all([
+    verifyProviderAuth(userId, "gmail"),
+    verifyProviderAuth(userId, "googlecalendar"),
+  ]);
 
   const threadItems = gmailConnected ? await getInboxThreads(userId) : [];
 
@@ -43,16 +39,7 @@ export default async function InboxPage({
           <span className="text-sm font-semibold tracking-tight">Command Inbox</span>
         </div>
         <div className="flex items-center gap-1.5">
-          {gmailConnected && <SyncButton />}
-          {!calendarConnected && (
-            <a
-              className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-              href="/api/corsair/connect?provider=googlecalendar"
-            >
-              <Calendar className="size-4" />
-              Connect Calendar
-            </a>
-          )}
+          {gmailConnected && calendarConnected && <SyncButton />}
           <ThemeToggle />
           <UserMenu />
         </div>
@@ -65,7 +52,7 @@ export default async function InboxPage({
             {scopeError === "gmail" ? "Gmail" : "Google Calendar"}.
           </span>
           <a
-            className={cn(buttonVariants({ size: "sm" }))}
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
             href={`/api/corsair/connect?provider=${scopeError}`}
           >
             Try again
@@ -79,7 +66,7 @@ export default async function InboxPage({
         </div>
       )}
 
-      {gmailConnected ? (
+      {gmailConnected && calendarConnected ? (
         <InboxView initialThreads={threadItems} />
       ) : (
         <ConnectScreen gmailConnected={gmailConnected} calendarConnected={calendarConnected} />

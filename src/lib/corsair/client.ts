@@ -1,7 +1,10 @@
 import "server-only";
+import { and, eq } from "drizzle-orm";
 import { AuthMissingError } from "corsair";
 import { generateOAuthUrl, processOAuthCallback } from "corsair/oauth";
 import { corsair } from "@/corsair";
+import { db } from "@/lib/db";
+import { corsairAccounts, corsairIntegrations } from "@/lib/db/schema";
 import { parseSearchQuery } from "@/lib/search/query";
 
 // ── Self-hosted Corsair client ────────────────────────────────────────────────
@@ -78,7 +81,35 @@ export async function completeOAuth(code: string, state: string): Promise<{ plug
   return processOAuthCallback(corsair, { code, state, redirectUri: getRedirectUri() });
 }
 
-/** True when Corsair can read credentials for this tenant (refresh token present). */
+/** True when OAuth tokens exist in corsair_accounts for this tenant + provider. */
+export async function hasCorsairAccount(userId: string, provider: Provider): Promise<boolean> {
+  const [row] = await db
+    .select({ id: corsairAccounts.id })
+    .from(corsairAccounts)
+    .innerJoin(corsairIntegrations, eq(corsairAccounts.integrationId, corsairIntegrations.id))
+    .where(and(eq(corsairAccounts.tenantId, userId), eq(corsairIntegrations.name, provider)))
+    .limit(1);
+  return !!row;
+}
+
+function isMissingAccountError(e: unknown): boolean {
+  return e instanceof Error && /Account not found for tenant/i.test(e.message);
+}
+
+/** Revoked tokens, missing refresh tokens, and other non-recoverable auth failures. */
+function isAuthFailure(e: unknown): boolean {
+  if (e instanceof AuthMissingError || isMissingAccountError(e)) return true;
+  if (!(e instanceof Error)) return false;
+  const m = e.message.toLowerCase();
+  return (
+    m.includes("invalid_grant") ||
+    m.includes("failed to refresh access token") ||
+    m.includes("failed to obtain valid access token") ||
+    m.includes("[auth-missing:")
+  );
+}
+
+/** True when Corsair can call the provider API (tokens present and not revoked). */
 export async function verifyProviderAuth(userId: string, provider: Provider): Promise<boolean> {
   try {
     const t = tenant(userId);
@@ -89,17 +120,16 @@ export async function verifyProviderAuth(userId: string, provider: Provider): Pr
     }
     return true;
   } catch (e) {
-    return !(e instanceof AuthMissingError);
+    return !isAuthFailure(e);
   }
 }
 
-// Map the SDK's AuthMissingError onto our redirectable CorsairAuthError; let
-// every other error propagate unchanged.
+// Map auth failures onto our redirectable CorsairAuthError; let other errors propagate.
 async function call<T>(provider: Provider, fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (e) {
-    if (e instanceof AuthMissingError) throw new CorsairAuthError(signInLinkFor(provider));
+    if (isAuthFailure(e)) throw new CorsairAuthError(signInLinkFor(provider));
     throw e;
   }
 }
@@ -187,7 +217,7 @@ export async function searchCachedMessages(
     try {
       return await t.gmail.db.messages.search({ data: { [field]: { contains: value } }, limit });
     } catch (e) {
-      if (strict && e instanceof AuthMissingError) throw new CorsairAuthError(signInLinkFor("gmail"));
+      if (strict && isAuthFailure(e)) throw new CorsairAuthError(signInLinkFor("gmail"));
       return [];
     }
   };
@@ -267,7 +297,7 @@ export async function createEvent(userId: string, input: CreateEventInput) {
       sendUpdates: "all",
     });
   } catch (e) {
-    if (e instanceof AuthMissingError) throw new CorsairAuthError(signInLinkFor("googlecalendar"));
+    if (isAuthFailure(e)) throw new CorsairAuthError(signInLinkFor("googlecalendar"));
     console.error(
       "[corsair:createEvent] threw:",
       e instanceof Error ? { message: e.message, name: e.name } : e

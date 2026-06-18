@@ -1,12 +1,9 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
-import { db } from "@/lib/db";
-import { corsairConnections } from "@/lib/db/schema";
+import { CorsairAuthError } from "@/lib/corsair/client";
 import { syncGmail } from "@/lib/sync/gmail";
 import { classifyUnclassified } from "@/lib/llm/classify";
 import { broadcastToUser } from "@/lib/sse";
-import { CorsairAuthError } from "@/lib/corsair/client";
 
 // Real-time fallback: the client hits this on an interval. Pulls the few newest
 // messages; if any are new, classifies them and pushes an SSE event so every
@@ -17,12 +14,6 @@ export async function POST() {
   const userId = session.user.id;
 
   try {
-    const conns = await db
-      .select()
-      .from(corsairConnections)
-      .where(eq(corsairConnections.userId, userId));
-    if (!conns.some((c) => c.provider === "gmail")) return NextResponse.json({ created: 0 });
-
     const { created } = await syncGmail(userId, 10);
     if (created > 0) {
       await classifyUnclassified(userId, created);

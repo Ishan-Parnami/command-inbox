@@ -15,7 +15,13 @@ export function RealtimeListener() {
     const tick = async () => {
       try {
         const res = await fetch("/api/poll", { method: "POST" });
-        if (!active || !res.ok) return;
+        if (!active) return;
+        if (res.status === 409) {
+          const data = await res.json();
+          if (data.signInLink) window.location.href = data.signInLink;
+          return;
+        }
+        if (!res.ok) return;
         const data = await res.json();
         if (data.created > 0) queryClient.invalidateQueries({ queryKey: ["threads"] });
       } catch {
